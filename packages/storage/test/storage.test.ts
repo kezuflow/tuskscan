@@ -7,6 +7,7 @@ import {
   recallExploitMemories,
   storeAuditArtifacts,
   verifyArtifact,
+  writeAuditMemoryRecords,
   writeExploitLessons,
 } from "../src/index.ts";
 
@@ -56,4 +57,53 @@ test("recalls and writes exploit memories through the memory store interface", a
 
   assert.equal(written.length, 1);
   assert.equal(recalled[0]?.id, written[0]?.id);
+});
+
+test("writes reusable vulnerability patterns and audit observations", async () => {
+  const store = new InMemoryExploitMemoryStore();
+
+  const written = await writeAuditMemoryRecords({
+    observations: [
+      {
+        chain: "sui",
+        confirmed: false,
+        findingId: "finding-1",
+        kind: "audit_observation",
+        language: "move",
+        observedAt: "2026-06-13T00:00:00.000Z",
+        packageId: "0x1",
+        patternId: "pattern:sui:move:move_missing_capability_param",
+        severity: "critical",
+        sourceModules: ["vault"],
+      },
+    ],
+    patterns: [
+      {
+        category: "access_control",
+        chain: "sui",
+        exploitModel: ["Attacker calls public entry directly."],
+        falsePositiveChecks: ["Check helper authorization."],
+        fixPattern: ["Require AdminCap."],
+        id: "pattern:sui:move:move_missing_capability_param",
+        kind: "vulnerability_pattern",
+        language: "move",
+        pattern: "Public entry mutates privileged state without capability.",
+        ruleId: "MOVE_MISSING_CAPABILITY_PARAM",
+        severity: "critical",
+        signals: ["public entry", "no capability"],
+        updatedAt: "2026-06-13T00:00:00.000Z",
+      },
+    ],
+    store,
+  });
+  const recalled = await recallExploitMemories({
+    context: "vulnerability_pattern missing capability",
+    store,
+  });
+
+  assert.equal(written.length, 2);
+  assert.equal(
+    recalled.some((memory) => memory.summary.includes("\"kind\":\"vulnerability_pattern\"")),
+    true,
+  );
 });

@@ -7,6 +7,7 @@ import {
   InMemoryWalrusStore,
   recallExploitMemories,
   storeAuditArtifacts,
+  writeAuditMemoryRecords,
   writeExploitLessons,
   type MemoryStore,
   type WalrusStore,
@@ -107,6 +108,13 @@ export async function processPaidAuditJob(
           await writeExploitLessons({
             lessons,
             metadata: { packageId: job.packageId },
+            store: memory,
+          });
+        },
+        writeMemories: async (memories) => {
+          await writeAuditMemoryRecords({
+            observations: memories.observations,
+            patterns: memories.patterns,
             store: memory,
           });
         },

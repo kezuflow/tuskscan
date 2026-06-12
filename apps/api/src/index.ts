@@ -44,6 +44,7 @@ import {
   recallExploitMemories,
   storeAuditArtifacts,
   verifyArtifact,
+  writeAuditMemoryRecords,
   writeExploitLessons,
   type MemoryStore,
   type WalrusStore,
@@ -1362,7 +1363,7 @@ async function runStoreAndFinalizeAudit(options: {
       memoryAgent: {
         recall: async (snapshot) => {
           const recalled = await recallExploitMemories({
-            context: `${snapshot.packageId} admin capability shared object mutation withdraw transfer`,
+            context: buildMemoryRecallContext(snapshot),
             store: options.memory,
           });
           return recalled.map((item): ExploitMemory => ({
@@ -1374,6 +1375,13 @@ async function runStoreAndFinalizeAudit(options: {
           await writeExploitLessons({
             lessons,
             metadata: { packageId: snapshot.packageId },
+            store: options.memory,
+          });
+        },
+        writeMemories: async (memories) => {
+          await writeAuditMemoryRecords({
+            observations: memories.observations,
+            patterns: memories.patterns,
             store: options.memory,
           });
         },
@@ -1437,6 +1445,28 @@ async function runStoreAndFinalizeAudit(options: {
     options.job.status = "failed";
     throw error;
   }
+}
+
+function buildMemoryRecallContext(snapshot: NormalizedPackageSnapshot) {
+  const moduleNames = snapshot.modules.map((module) => module.name);
+  const functionNames = snapshot.modules.flatMap((module) =>
+    module.functions
+      .filter((fn) => fn.isEntry || fn.visibility === "public")
+      .map((fn) => `${module.name}::${fn.name}`),
+  );
+  const structNames = snapshot.modules.flatMap((module) =>
+    module.structs.map((struct) => `${module.name}::${struct.name}`),
+  );
+  return [
+    snapshot.packageId,
+    "sui move vulnerability_pattern audit_observation",
+    "admin owner capability shared object withdraw transfer claim mint burn treasury replay dynamic field vector delete randomness initialize",
+    ...moduleNames,
+    ...functionNames,
+    ...structNames,
+  ]
+    .join(" ")
+    .slice(0, 4_000);
 }
 
 async function runSandboxMoveTests(options: {

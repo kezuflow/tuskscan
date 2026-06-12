@@ -1,11 +1,13 @@
 import type {
   AuditFinding,
   AuditReport,
+  AuditObservationMemory,
   FindingSeverity,
   MemoryReference,
   NormalizedPackageSnapshot,
   PackageSummary,
   SourceContext,
+  VulnerabilityPatternMemory,
 } from "@repo/shared";
 
 export type ExploitMemory = MemoryReference & {
@@ -16,6 +18,8 @@ export type AuditEngineResult = {
   findings: AuditFinding[];
   memoryDiff: {
     learned: string[];
+    observations?: AuditObservationMemory[];
+    patterns?: VulnerabilityPatternMemory[];
     recalled: ExploitMemory[];
   };
   publicReportMarkdown: string;
@@ -25,10 +29,20 @@ export type AuditEngineResult = {
 
 export type ExploitMemoryAgent = {
   recall(snapshot: NormalizedPackageSnapshot): Promise<ExploitMemory[]> | ExploitMemory[];
+  writeMemories?(
+    memories: AuditMemoryWrite,
+    snapshot: NormalizedPackageSnapshot,
+  ): Promise<void> | void;
   writeLessons?(
     lessons: string[],
     snapshot: NormalizedPackageSnapshot,
   ): Promise<void> | void;
+};
+
+export type AuditMemoryWrite = {
+  lessons: string[];
+  observations: AuditObservationMemory[];
+  patterns: VulnerabilityPatternMemory[];
 };
 
 export type FindingAgentInput = {

@@ -2,7 +2,7 @@ import type { NormalizedPackageSnapshot, PackageSummary, SourceContext } from "@
 
 import { runCriticAgent } from "./critic.js";
 import { runFixAgent } from "./fix.js";
-import { extractMemoryLessons } from "./memory.js";
+import { extractMemoryWriteBundle } from "./memory.js";
 import { createAuditReport } from "./report.js";
 import { runScannerAgent } from "./scanner.js";
 import { summarizeSourceContext } from "./source-context.js";
@@ -59,15 +59,21 @@ export async function runAuditWorkflow(options: {
       : undefined,
     snapshot: options.snapshot,
   });
-  const lessons = extractMemoryLessons(remediatedFindings);
+  const memoryWrite = extractMemoryWriteBundle(remediatedFindings, options.snapshot);
 
-  await options.memoryAgent?.writeLessons?.(lessons, options.snapshot);
+  if (options.memoryAgent?.writeMemories) {
+    await options.memoryAgent.writeMemories(memoryWrite, options.snapshot);
+  } else {
+    await options.memoryAgent?.writeLessons?.(memoryWrite.lessons, options.snapshot);
+  }
 
   return {
     ...reportResult,
     criticDecisions: criticResult.decisions,
     memoryDiff: {
-      learned: lessons,
+      learned: memoryWrite.lessons,
+      observations: memoryWrite.observations,
+      patterns: memoryWrite.patterns,
       recalled: recalledMemories,
     },
   };

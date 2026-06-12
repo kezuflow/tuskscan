@@ -12,7 +12,12 @@ export type {
 
 export { runCriticAgent } from "./critic.js";
 export { runFixAgent } from "./fix.js";
-export { extractMemoryLessons } from "./memory.js";
+export {
+  extractAuditObservations,
+  extractMemoryLessons,
+  extractMemoryWriteBundle,
+  extractVulnerabilityPatternMemories,
+} from "./memory.js";
 export { runDeterministicAudit } from "./metadata-rules.js";
 export { calculateRiskScore, createAuditReport } from "./report.js";
 export { runScannerAgent } from "./scanner.js";

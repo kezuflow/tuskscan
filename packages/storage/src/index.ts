@@ -1,4 +1,10 @@
-import type { ArtifactPointer, AuditReportArtifacts, MemoryReference } from "@repo/shared";
+import type {
+  ArtifactPointer,
+  AuditObservationMemory,
+  AuditReportArtifacts,
+  MemoryReference,
+  VulnerabilityPatternMemory,
+} from "@repo/shared";
 import { sha256Hex, stableJson } from "@repo/sui-integration";
 import { MemWal } from "@mysten-incubation/memwal";
 
@@ -267,6 +273,37 @@ export async function writeExploitLessons(options: {
       options.store.remember({ content: lesson, metadata: options.metadata }),
     ),
   );
+}
+
+export async function writeAuditMemoryRecords(options: {
+  observations: AuditObservationMemory[];
+  patterns: VulnerabilityPatternMemory[];
+  store: MemoryStore;
+}) {
+  const records = [
+    ...options.patterns.map((pattern) => ({
+      content: stableJson(pattern),
+      metadata: {
+        category: pattern.category,
+        kind: pattern.kind,
+        patternId: pattern.id,
+        ruleId: pattern.ruleId,
+        severity: pattern.severity,
+      },
+    })),
+    ...options.observations.map((observation) => ({
+      content: stableJson(observation),
+      metadata: {
+        findingId: observation.findingId,
+        kind: observation.kind,
+        packageId: observation.packageId,
+        patternId: observation.patternId,
+        severity: observation.severity,
+      },
+    })),
+  ];
+
+  return Promise.all(records.map((record) => options.store.remember(record)));
 }
 
 export async function verifyArtifact(options: {

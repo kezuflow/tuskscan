@@ -167,6 +167,15 @@ Record IDs in `docs/demo-packages.md`.
 
 The pitch: Package A teaches the agent an exploit pattern; Package B proves the memory is portable and reusable through the Walrus/MemWal data layer.
 
+## MemWal Memory Model
+
+TuskScan stores reusable vulnerability knowledge in MemWal as structured records, not only as free-form report text.
+
+- `vulnerability_pattern`: reusable Sui Move security knowledge keyed by rule/category. It stores signals, exploit model, fix pattern, and false-positive checks.
+- `audit_observation`: a lightweight package-specific receipt that links one finding back to a reusable pattern.
+
+This makes MemWal the agent memory layer: future audits recall prior Sui Move exploit patterns and use them to mark findings as memory-assisted. Supabase remains the app index for wallet history, while Walrus stores verifiable report artifacts.
+
 ## Checks
 
 ```powershell

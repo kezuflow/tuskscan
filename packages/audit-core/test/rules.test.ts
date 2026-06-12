@@ -146,6 +146,10 @@ test("agent workflow recalls memory, keeps deterministic findings, and writes le
       writeLessons: (lessons) => {
         writtenLessons.push(...lessons);
       },
+      writeMemories: (memories) => {
+        writtenLessons.push(...memories.patterns.map((pattern) => pattern.pattern));
+        writtenLessons.push(...memories.observations.map((observation) => observation.patternId));
+      },
     },
     packageSummary: vulnerablePackageSummary,
     sourceContext: sourceContextFromFiles({
@@ -170,7 +174,9 @@ test("agent workflow recalls memory, keeps deterministic findings, and writes le
   assert.equal(result.report.sourceConsistency?.level, "module_name_match");
   assert.equal((result.report.memoryPlaybooks?.length ?? 0) > 0, true);
   assert.equal(result.memoryDiff.recalled.length, 1);
-  assert.equal(writtenLessons.some((lesson) => lesson.includes("PLAYBOOK")), true);
+  assert.equal((result.memoryDiff.patterns?.length ?? 0) > 0, true);
+  assert.equal((result.memoryDiff.observations?.length ?? 0) > 0, true);
+  assert.equal(writtenLessons.some((lesson) => lesson.includes("pattern:sui:move")), true);
 });
 
 test("demo package B can be marked memory-assisted after package A teaches a lesson", () => {

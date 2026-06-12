@@ -203,6 +203,41 @@ export type MemoryPlaybook = {
   summary: string;
 };
 
+export type VulnerabilityPatternMemory = {
+  category: string;
+  chain: "sui";
+  exampleEvidence?: {
+    filePath?: string;
+    functionName?: string;
+    moduleName: string;
+    severity: FindingSeverity;
+  };
+  exploitModel: string[];
+  falsePositiveChecks: string[];
+  fixPattern: string[];
+  id: string;
+  kind: "vulnerability_pattern";
+  language: "move";
+  pattern: string;
+  ruleId: string;
+  severity: FindingSeverity;
+  signals: string[];
+  updatedAt: string;
+};
+
+export type AuditObservationMemory = {
+  chain: "sui";
+  confirmed: boolean;
+  findingId: string;
+  kind: "audit_observation";
+  language: "move";
+  observedAt: string;
+  packageId: string;
+  patternId: string;
+  severity: FindingSeverity;
+  sourceModules: string[];
+};
+
 export type AuditReportArtifacts = {
   auditRunLog?: ArtifactPointer;
   findings?: ArtifactPointer;

@@ -144,12 +144,40 @@ export type ExploitTestDraft = {
   name: string;
   notes: string[];
   source?: string;
-  status: "draft_needs_project_binding";
+  status:
+    | "draft_needs_project_binding"
+    | "executed_compile_only"
+    | "execution_failed"
+    | "skipped";
   target?: {
     filePath?: string;
     functionName?: string;
     moduleName: string;
   };
+};
+
+export type SandboxCommandResult = {
+  command: string;
+  durationMs: number;
+  exitCode: number | null;
+  stderrTail?: string;
+  stdoutTail?: string;
+};
+
+export type SandboxTestRun = {
+  baseline?: SandboxCommandResult;
+  generated?: SandboxCommandResult;
+  generatedTestFile?: string;
+  note: string;
+  packagePath?: string;
+  status:
+    | "disabled"
+    | "source_unavailable"
+    | "sui_cli_missing"
+    | "baseline_failed"
+    | "generated_failed"
+    | "completed";
+  testsAttempted: number;
 };
 
 export type AgentReview = {
@@ -216,6 +244,7 @@ export type AuditReport = {
   severityBreakdown?: Record<FindingSeverity, number>;
   sourceConsistency?: SourceConsistency;
   sourceSummary?: SourceSummary;
+  sandboxTestRun?: SandboxTestRun;
   status: AuditStatus;
   summary: string;
   topRisks?: string[];

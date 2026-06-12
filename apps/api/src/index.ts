@@ -1,8 +1,12 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { promisify } from "node:util";
 
 import { Transaction } from "@mysten/sui/transactions";
 import { SuiJsonRpcClient, getJsonRpcFullnodeUrl } from "@mysten/sui/jsonRpc";
@@ -27,6 +31,8 @@ import {
   type Network,
   type NormalizedPackageSnapshot,
   type PackageSummary,
+  type SandboxCommandResult,
+  type SandboxTestRun,
   type SourceContext,
   type SourceSummary,
 } from "@repo/shared";
@@ -68,6 +74,9 @@ type RuntimeConfig = {
   operatorCapId?: string;
   operatorPrivateKey?: string;
   priceMist: string;
+  runMoveTests: boolean;
+  sandboxTimeoutMs: number;
+  suiCliPath?: string;
   suiRpcUrl?: string;
   tuskscanConfigId?: string;
   tuskscanPackageId?: string;
@@ -174,6 +183,7 @@ type AuditJobProcessor = (jobId: string) => Promise<void>;
 const DEFAULT_PRICE_MIST = "100000000";
 const JOB_LOCK_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 15 * 60 * 1000;
+const execFileAsync = promisify(execFile);
 
 loadLocalEnvFiles();
 
@@ -193,12 +203,26 @@ export function loadRuntimeConfig(env = process.env): RuntimeConfig {
     operatorCapId: env.TUSKSCAN_OPERATOR_CAP_ID,
     operatorPrivateKey: env.TUSKSCAN_OPERATOR_PRIVATE_KEY,
     priceMist: parsePriceMist(env.TUSKSCAN_PRICE_MIST),
+    runMoveTests: parseBoolean(env.TUSKSCAN_RUN_MOVE_TESTS),
+    sandboxTimeoutMs: parsePositiveInteger(env.TUSKSCAN_SANDBOX_TIMEOUT_MS, 120_000),
+    suiCliPath: env.TUSKSCAN_SUI_BIN,
     suiRpcUrl: env.SUI_RPC_URL,
     tuskscanConfigId: env.TUSKSCAN_CONFIG_ID,
     tuskscanPackageId: env.TUSKSCAN_PACKAGE_ID,
     walrusAggregatorUrl: env.WALRUS_AGGREGATOR_URL,
     walrusPublisherUrl: env.WALRUS_PUBLISHER_URL,
   };
+}
+
+function parseBoolean(value: string | undefined) {
+  return value === "1" || value?.toLowerCase() === "true";
+}
+
+function parsePositiveInteger(value: string | undefined, fallback: number) {
+  if (!value) return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) return fallback;
+  return parsed;
 }
 
 function parseRuntimeEnvironment(value: string | undefined): RuntimeConfig["environment"] {
@@ -267,6 +291,7 @@ export function validateRuntimeConfig(config: RuntimeConfig) {
           ? "production"
           : "missing",
     llmAgents: config.llmApiKey ? "production" : "disabled",
+    moveTestSandbox: config.runMoveTests ? "enabled" : "disabled",
     auditConfig: config.tuskscanConfigId ? "production" : "missing",
     operatorFinalizer:
       config.tuskscanPackageId &&
@@ -616,6 +641,7 @@ function createAuditJobProcessor(options: {
       }
 
       await runStoreAndFinalizeAudit({
+        config: options.config,
         criticAgent: options.criticAgent ?? agents?.criticAgent,
         finalizer: options.finalizer ?? createAuditReportFinalizer(options.config),
         findingAgent: options.findingAgent ?? agents?.findingAgent,
@@ -1320,6 +1346,7 @@ function createAuditReportFinalizer(config: RuntimeConfig): AuditReportFinalizer
 }
 
 async function runStoreAndFinalizeAudit(options: {
+  config: RuntimeConfig;
   criticAgent?: AuditCriticAgent;
   finalizer: AuditReportFinalizer;
   findingAgent?: AuditFindingAgent;
@@ -1355,6 +1382,24 @@ async function runStoreAndFinalizeAudit(options: {
       sourceContext: options.job.sourceContext,
       snapshot: options.snapshot,
     });
+    const sandbox = await runSandboxMoveTests({
+      config: options.config,
+      report: audit.report,
+      sourceContext: options.job.sourceContext,
+    });
+    audit.report = {
+      ...audit.report,
+      generatedExploitTests: sandbox.generatedTests,
+      sandboxTestRun: sandbox.run,
+    };
+    audit.privateReportMarkdown = appendSandboxMarkdown(
+      audit.privateReportMarkdown,
+      audit.report,
+    );
+    audit.publicReportMarkdown = appendSandboxMarkdown(
+      audit.publicReportMarkdown,
+      audit.report,
+    );
 
     const stored = await storeAuditArtifacts({
       contents: {
@@ -1392,6 +1437,282 @@ async function runStoreAndFinalizeAudit(options: {
     options.job.status = "failed";
     throw error;
   }
+}
+
+async function runSandboxMoveTests(options: {
+  config: RuntimeConfig;
+  report: AuditReport;
+  sourceContext?: SourceContext;
+}): Promise<{
+  generatedTests: NonNullable<AuditReport["generatedExploitTests"]>;
+  run: SandboxTestRun;
+}> {
+  const generatedTests = options.report.generatedExploitTests ?? [];
+  if (!options.config.runMoveTests) {
+    return {
+      generatedTests: generatedTests.map((test) => ({ ...test, status: "skipped" })),
+      run: {
+        note: "Sandbox Move test execution is disabled. Set TUSKSCAN_RUN_MOVE_TESTS=1 to enable repo checkout and sui move test execution.",
+        status: "disabled",
+        testsAttempted: 0,
+      },
+    };
+  }
+  if (!options.sourceContext?.url) {
+    return {
+      generatedTests: generatedTests.map((test) => ({ ...test, status: "skipped" })),
+      run: {
+        note: "No source repository was available for sandbox test execution.",
+        status: "source_unavailable",
+        testsAttempted: 0,
+      },
+    };
+  }
+
+  const parsed = parseGithubSourceUrl(options.sourceContext.url);
+  if (!parsed) {
+    return {
+      generatedTests: generatedTests.map((test) => ({ ...test, status: "skipped" })),
+      run: {
+        note: "Source URL could not be parsed as a GitHub repository for sandbox execution.",
+        status: "source_unavailable",
+        testsAttempted: 0,
+      },
+    };
+  }
+
+  const sandboxRoot = await mkdtemp(join(tmpdir(), "tuskscan-"));
+  const clonePath = join(sandboxRoot, "repo");
+  const branch = options.sourceContext.branch ?? parsed.branch;
+  try {
+    const cloneArgs = ["clone", "--depth", "1"];
+    if (branch) cloneArgs.push("--branch", branch);
+    cloneArgs.push(`https://github.com/${parsed.owner}/${parsed.repo}.git`, clonePath);
+    const cloneResult = await runSandboxCommand("git", cloneArgs, sandboxRoot, options.config);
+    if (cloneResult.exitCode !== 0) {
+      return {
+        generatedTests: generatedTests.map((test) => ({ ...test, status: "skipped" })),
+        run: {
+          baseline: cloneResult,
+          note: "GitHub checkout failed before Sui Move tests could run.",
+          status: "source_unavailable",
+          testsAttempted: 0,
+        },
+      };
+    }
+
+    const packagePath = join(
+      clonePath,
+      normalizePackageRoot(options.sourceContext.selectedRoot ?? parsed.pathPrefix),
+    );
+    const baseline = await runSandboxCommand(
+      options.config.suiCliPath ?? "sui",
+      ["move", "test"],
+      packagePath,
+      options.config,
+    );
+    if (isMissingExecutable(baseline)) {
+      return {
+        generatedTests: generatedTests.map((test) => ({ ...test, status: "skipped" })),
+        run: {
+          baseline,
+          note: "Sui CLI was not available to execute Move tests.",
+          packagePath: relativeSandboxPath(packagePath, sandboxRoot),
+          status: "sui_cli_missing",
+          testsAttempted: 0,
+        },
+      };
+    }
+    if (baseline.exitCode !== 0) {
+      return {
+        generatedTests: generatedTests.map((test) => ({ ...test, status: "skipped" })),
+        run: {
+          baseline,
+          note: "Baseline package tests failed; generated exploit tests were not injected.",
+          packagePath: relativeSandboxPath(packagePath, sandboxRoot),
+          status: "baseline_failed",
+          testsAttempted: 0,
+        },
+      };
+    }
+
+    if (generatedTests.length === 0) {
+      return {
+        generatedTests,
+        run: {
+          baseline,
+          note: "Baseline package tests passed; no critical/high generated exploit tests were available.",
+          packagePath: relativeSandboxPath(packagePath, sandboxRoot),
+          status: "completed",
+          testsAttempted: 0,
+        },
+      };
+    }
+
+    const testsDirectory = join(packagePath, "tests");
+    await mkdir(testsDirectory, { recursive: true });
+    const generatedTestFile = join(testsDirectory, "tuskscan_generated_tests.move");
+    await writeFile(
+      generatedTestFile,
+      await renderGeneratedMoveTestModule(packagePath, generatedTests),
+      "utf8",
+    );
+    const generated = await runSandboxCommand(
+      options.config.suiCliPath ?? "sui",
+      ["move", "test", "tuskscan_"],
+      packagePath,
+      options.config,
+    );
+    const generatedStatus = generated.exitCode === 0 ? "executed_compile_only" : "execution_failed";
+    return {
+      generatedTests: generatedTests.map((test) => ({
+        ...test,
+        status: generatedStatus,
+      })),
+      run: {
+        baseline,
+        generated,
+        generatedTestFile: relativeSandboxPath(generatedTestFile, sandboxRoot),
+        note:
+          generated.exitCode === 0
+            ? "Baseline tests passed and generated TuskScan exploit-test skeletons executed as compile-only regression placeholders. Bind project fixtures to turn them into concrete exploit PoCs."
+            : "Baseline tests passed, but generated TuskScan test skeletons failed to compile or execute.",
+        packagePath: relativeSandboxPath(packagePath, sandboxRoot),
+        status: generated.exitCode === 0 ? "completed" : "generated_failed",
+        testsAttempted: generatedTests.length,
+      },
+    };
+  } finally {
+    await rm(sandboxRoot, { force: true, recursive: true });
+  }
+}
+
+async function runSandboxCommand(
+  command: string,
+  args: string[],
+  cwd: string,
+  config: RuntimeConfig,
+): Promise<SandboxCommandResult> {
+  const started = Date.now();
+  const commandText = [command, ...args].join(" ");
+  try {
+    const result = await execFileAsync(command, args, {
+      cwd,
+      timeout: config.sandboxTimeoutMs,
+      windowsHide: true,
+    });
+    return {
+      command: commandText,
+      durationMs: Date.now() - started,
+      exitCode: 0,
+      stderrTail: tail(result.stderr),
+      stdoutTail: tail(result.stdout),
+    };
+  } catch (error) {
+    const details = error as {
+      code?: number | string;
+      killed?: boolean;
+      stderr?: string;
+      stdout?: string;
+    };
+    return {
+      command: commandText,
+      durationMs: Date.now() - started,
+      exitCode: typeof details.code === "number" ? details.code : null,
+      stderrTail: tail(
+        details.stderr ??
+          (details.code === "ENOENT" ? `${command} executable was not found.` : String(error)),
+      ),
+      stdoutTail: tail(details.stdout),
+    };
+  }
+}
+
+async function renderGeneratedMoveTestModule(
+  packagePath: string,
+  tests: NonNullable<AuditReport["generatedExploitTests"]>,
+) {
+  const addressName = await inferMoveTestAddress(packagePath);
+  return [
+    "#[test_only]",
+    `module ${addressName}::tuskscan_generated_tests {`,
+    ...tests.flatMap((test) => [
+      "    #[test]",
+      `    fun ${sanitizeMoveIdentifier(test.name)}() {`,
+      "        // TuskScan generated compile-only exploit regression skeleton.",
+      `        // Finding: ${test.findingId}`,
+      ...test.notes.map((note) => `        // ${sanitizeMoveComment(note)}`),
+      ...(test.source ?? "")
+        .split(/\r?\n/)
+        .slice(0, 24)
+        .map((line) => `        // ${sanitizeMoveComment(line)}`),
+      "    }",
+      "",
+    ]),
+    "}",
+    "",
+  ].join("\n");
+}
+
+async function inferMoveTestAddress(packagePath: string) {
+  try {
+    const manifest = await readFile(join(packagePath, "Move.toml"), "utf8");
+    const addresses = manifest.match(/\[addresses\]([\s\S]*?)(?:\n\[|$)/)?.[1] ?? "";
+    const firstAddress = addresses.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/m)?.[1];
+    if (firstAddress) return firstAddress;
+  } catch {
+    // Fall through to numeric address for packages without a readable manifest.
+  }
+  return "0x0";
+}
+
+function appendSandboxMarkdown(markdown: string, report: AuditReport) {
+  const run = report.sandboxTestRun;
+  if (!run) return markdown;
+  const lines = [
+    "",
+    "## Sandbox Move Test Execution",
+    "",
+    `Status: \`${run.status}\``,
+    "",
+    run.note,
+    "",
+    run.packagePath ? `Package path: \`${run.packagePath}\`` : undefined,
+    run.baseline ? `Baseline: \`${run.baseline.command}\` -> ${run.baseline.exitCode}` : undefined,
+    run.generated ? `Generated: \`${run.generated.command}\` -> ${run.generated.exitCode}` : undefined,
+    run.generatedTestFile ? `Generated test file: \`${run.generatedTestFile}\`` : undefined,
+    `Tests attempted: ${run.testsAttempted}`,
+    "",
+  ].filter((line): line is string => typeof line === "string");
+  return `${markdown.trimEnd()}\n${lines.join("\n")}\n`;
+}
+
+function normalizePackageRoot(root: string | undefined) {
+  if (!root || root === ".") return "";
+  return root.replace(/^[\\/]+/, "").replace(/[\\/]+$/, "");
+}
+
+function relativeSandboxPath(path: string, sandboxRoot: string) {
+  return path.startsWith(sandboxRoot) ? path.slice(sandboxRoot.length + 1) : path;
+}
+
+function isMissingExecutable(result: SandboxCommandResult) {
+  return result.exitCode === null && /not found|ENOENT/i.test(result.stderrTail ?? "");
+}
+
+function tail(value: string | undefined, maxLength = 4_000) {
+  if (!value) return undefined;
+  return value.length <= maxLength ? value : value.slice(-maxLength);
+}
+
+function sanitizeMoveIdentifier(value: string) {
+  const sanitized = value.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
+  const identifier = /^[a-z_]/.test(sanitized) ? sanitized : `test_${sanitized}`;
+  return `tuskscan_${identifier}`.slice(0, 80);
+}
+
+function sanitizeMoveComment(value: string) {
+  return value.replace(/\*\//g, "* /").slice(0, 180);
 }
 
 type LlmAgentBundle = {

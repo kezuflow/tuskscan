@@ -99,6 +99,13 @@ type AuditReport = {
     source?: string;
     status: string;
   }>;
+  sandboxTestRun?: {
+    generatedTestFile?: string;
+    note: string;
+    packagePath?: string;
+    status: string;
+    testsAttempted: number;
+  };
   memoryPlaybooks?: Array<{
     findingId: string;
     id: string;
@@ -540,6 +547,15 @@ export default function Home() {
                 {audit.report.generatedExploitTests?.[0] ? (
                   <small>{audit.report.generatedExploitTests[0].command}</small>
                 ) : null}
+              </div>
+              <div>
+                <span>Sandbox</span>
+                <p>{audit.report.sandboxTestRun?.status ?? "disabled"}</p>
+                <small>
+                  {audit.report.sandboxTestRun
+                    ? `${audit.report.sandboxTestRun.testsAttempted} attempted`
+                    : "Set TUSKSCAN_RUN_MOVE_TESTS=1"}
+                </small>
               </div>
               <div>
                 <span>Agent review</span>

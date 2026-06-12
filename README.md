@@ -100,6 +100,9 @@ MEMWAL_SERVER_URL=https://relayer.memwal.ai
 LLM_API_KEY=<optional OpenAI-compatible API key for researcher/exploit/critic agents>
 LLM_MODEL=gpt-4.1-mini
 LLM_BASE_URL=https://api.openai.com/v1
+TUSKSCAN_RUN_MOVE_TESTS=0
+TUSKSCAN_SANDBOX_TIMEOUT_MS=120000
+TUSKSCAN_SUI_BIN=sui
 ```
 
 The API loads `apps/api/.env` and `apps/api/.env.local` automatically when run through `pnpm dev`. `localhost` mode is for opening the app and local package work. `production` mode is the real demo path and requires Walrus, MemWal, payment verification, and operator finalization envs.
@@ -115,6 +118,8 @@ pnpm --filter api db:apply
 pnpm --filter api db:generate
 pnpm --filter api db:studio
 ```
+
+Set `TUSKSCAN_RUN_MOVE_TESTS=1` only on an API machine with `git` and `sui` available. Use `TUSKSCAN_SUI_BIN` when the Sui binary is not on `PATH`. When enabled, TuskScan clones the submitted GitHub repo into a temporary sandbox, runs `sui move test` at the selected Move package root, injects generated compile-only exploit regression skeletons, and runs `sui move test tuskscan_`. This is not formal verification yet; it proves the package baseline and generated test harness compile path, then leaves fixture binding notes for concrete exploit PoCs.
 
 ## Run
 

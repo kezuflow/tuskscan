@@ -1,0 +1,48 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "globalEnv": [
+    "NEXT_PUBLIC_TUSKSCAN_API_URL",
+    "NEXT_PUBLIC_TUSKSCAN_CONFIG_ID",
+    "NEXT_PUBLIC_TUSKSCAN_OPERATOR_ADDRESS",
+    "NEXT_PUBLIC_TUSKSCAN_PACKAGE_ID",
+    "DATABASE_URL",
+    "GITHUB_TOKEN",
+    "MEMWAL_ACCOUNT_ID",
+    "MEMWAL_NAMESPACE",
+    "MEMWAL_PRIVATE_KEY",
+    "MEMWAL_SERVER_URL",
+    "PORT",
+    "SUI_NETWORK",
+    "SUI_RPC_URL",
+    "SUPABASE_DATABASE_URL",
+    "TUSKSCAN_ENV",
+    "TUSKSCAN_DEMO_JOB_OBJECT_ID",
+    "TUSKSCAN_DEMO_PACKAGE_ID",
+    "TUSKSCAN_DEMO_SNAPSHOT_HASH",
+    "TUSKSCAN_OPERATOR_ADDRESS",
+    "TUSKSCAN_OPERATOR_CAP_ID",
+    "TUSKSCAN_OPERATOR_PRIVATE_KEY",
+    "TUSKSCAN_PACKAGE_ID",
+    "WALRUS_AGGREGATOR_URL",
+    "WALRUS_PUBLISHER_URL",
+    "TUSKSCAN_RUN_NETWORK_TESTS"
+  ],
+  "ui": "tui",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "outputs": [".next/**", "!.next/cache/**", "!.next/dev/**"]
+    },
+    "lint": {
+      "dependsOn": ["^lint"]
+    },
+    "check-types": {
+      "dependsOn": ["^check-types"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    }
+  }
+}

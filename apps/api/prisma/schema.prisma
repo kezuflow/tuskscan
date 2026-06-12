@@ -1,0 +1,56 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Network {
+  mainnet
+  testnet
+}
+
+enum AuditStatus {
+  prepared
+  paid
+  queued
+  running
+  completed
+  failed
+}
+
+model AuditJob {
+  id                    String      @id
+  payer                 String
+  network               Network
+  packageId             String      @map("package_id")
+  packageSummary        Json        @map("package_summary")
+  snapshotHash          String      @map("snapshot_hash")
+  status                AuditStatus
+  suiJobObjectId        String      @unique @map("sui_job_object_id")
+  suiTransactionDigest  String      @map("sui_transaction_digest")
+  reportObjectId        String?     @map("report_object_id")
+  finalizedDigest       String?     @map("finalized_digest")
+  artifacts             Json?
+  report                Json?
+  publicReportMarkdown  String?     @map("public_report_markdown")
+  privateReportMarkdown String?     @map("private_report_markdown")
+  verification          Json?
+  sourceContext         Json?       @map("source_context")
+  sourceUrl             String?     @map("source_url")
+  attempts              Int         @default(0)
+  maxAttempts           Int         @default(3) @map("max_attempts")
+  lockedBy              String?     @map("locked_by")
+  lockedAt              DateTime?   @map("locked_at") @db.Timestamptz(6)
+  lockExpiresAt         DateTime?   @map("lock_expires_at") @db.Timestamptz(6)
+  lastError             String?     @map("last_error")
+  startedAt             DateTime?   @map("started_at") @db.Timestamptz(6)
+  completedAt           DateTime?   @map("completed_at") @db.Timestamptz(6)
+  createdAt             DateTime    @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([payer, createdAt(sort: Desc)], map: "audit_jobs_payer_created_at_idx")
+  @@index([status, lockExpiresAt, createdAt], map: "audit_jobs_queue_claim_idx")
+  @@map("audit_jobs")
+}

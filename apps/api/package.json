@@ -1,0 +1,37 @@
+{
+  "name": "api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc --noEmit",
+    "db:generate": "prisma generate --schema prisma/schema.prisma",
+    "db:apply": "node scripts/apply-schema.mjs",
+    "db:push": "prisma db push --schema prisma/schema.prisma",
+    "db:studio": "prisma studio --schema prisma/schema.prisma",
+    "start": "node src/index.ts",
+    "lint": "eslint . --max-warnings 0",
+    "test": "tsx --test test/*.test.ts",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@mysten/sui": "^2.17.0",
+    "@prisma/client": "^7.8.0",
+    "@repo/audit-core": "workspace:*",
+    "@repo/shared": "workspace:*",
+    "@repo/storage": "workspace:*",
+    "@repo/sui-integration": "workspace:*",
+    "pg": "^8.21.0"
+  },
+  "devDependencies": {
+    "@repo/eslint-config": "workspace:*",
+    "@repo/typescript-config": "workspace:*",
+    "@types/node": "^22.15.3",
+    "@types/pg": "^8.20.0",
+    "eslint": "^9.39.1",
+    "prisma": "^7.8.0",
+    "tsx": "^4.21.0",
+    "typescript": "5.9.2"
+  }
+}

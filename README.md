@@ -6,6 +6,32 @@ Users connect a Sui wallet, submit a deployed package ID, pay SUI into an onchai
 
 > TuskScan is AI pre-audit assistance for developer review. It is not a professional security audit and must not be treated as deployment approval.
 
+## Current Audit Capability
+
+TuskScan is built as a strong AI pre-audit system, not a replacement for a senior human security auditor.
+
+Today it can:
+
+- Fetch normalized deployed Sui package metadata from Sui RPC.
+- Scope GitHub source ingestion to the selected Move package root instead of loading an entire monorepo.
+- Run deterministic Sui Move vulnerability rules across package metadata and source.
+- Use LLM researcher, exploit-writer, patch-reviewer, and false-positive critic stages when configured.
+- Recall prior exploit patterns from MemWal and mark matching findings as memory-assisted.
+- Store reusable vulnerability patterns and audit observations back into MemWal.
+- Store package snapshots, findings, reports, run logs, source context, and memory diffs as Walrus artifacts.
+- Optionally clone source and run sandboxed `sui move test` plus generated compile-only exploit test skeletons.
+- Persist wallet-owned audit history in Supabase so users can revisit reports later.
+
+It does not yet claim to provide:
+
+- Full formal verification.
+- Symbolic execution.
+- Bytecode/source-map equivalence proof.
+- Guaranteed exploitability confirmation.
+- Production certification or deployment approval.
+
+The intended positioning is: fast wallet-native Sui Move pre-audits with verifiable artifacts and persistent agent memory.
+
 ## Architecture
 
 ```mermaid
@@ -175,6 +201,21 @@ TuskScan stores reusable vulnerability knowledge in MemWal as structured records
 - `audit_observation`: a lightweight package-specific receipt that links one finding back to a reusable pattern.
 
 This makes MemWal the agent memory layer: future audits recall prior Sui Move exploit patterns and use them to mark findings as memory-assisted. Supabase remains the app index for wallet history, while Walrus stores verifiable report artifacts.
+
+## Future TBD
+
+The next milestones to move TuskScan closer to professional-grade auditing:
+
+- Generate runnable exploit PoCs by binding project-specific fixtures and object constructors.
+- Compare source against deployed bytecode/source maps instead of module-name matching only.
+- Add a stronger multi-agent debate loop: researcher -> exploit writer -> patch reviewer -> false-positive critic -> final judge.
+- Calibrate confidence from confirmed historical outcomes, not only severity and memory matches.
+- Add a sandbox harness that attempts generated attacks and records pass/fail evidence.
+- Support package-specific invariant extraction from Move tests and docs.
+- Add formal-analysis integrations where available for Move bytecode.
+- Add reviewer mode for human auditors to confirm, reject, or upgrade findings and write those confirmations back to MemWal.
+- Store confirmed vulnerability/fix outcomes as higher-trust MemWal records.
+- Add report tiers: instant AI pre-audit, verified sandbox run, and human-reviewed certification.
 
 ## Checks
 

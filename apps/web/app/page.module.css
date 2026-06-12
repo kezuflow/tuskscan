@@ -304,7 +304,7 @@
 
 .reportSummary {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(220px, 0.65fr);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 14px;
   margin-bottom: 16px;
 }
@@ -336,6 +336,15 @@
 .reportSummary p {
   color: #17201d;
   line-height: 1.5;
+}
+
+.reportSummary small {
+  display: block;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+  color: #66736c;
+  font-family: var(--font-geist-mono);
+  font-size: 12px;
 }
 
 .tableHead,

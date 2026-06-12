@@ -148,6 +148,15 @@ test("agent workflow recalls memory, keeps deterministic findings, and writes le
       },
     },
     packageSummary: vulnerablePackageSummary,
+    sourceContext: sourceContextFromFiles({
+      "sources/vault.move": [
+        "module demo::vault {",
+        "  public entry fun admin_sweep(treasury: &mut Treasury, recipient: address) {",
+        "    transfer::public_transfer(treasury.coin, recipient);",
+        "  }",
+        "}",
+      ].join("\n"),
+    }),
     snapshot: vulnerablePackageSnapshot,
   });
 
@@ -156,8 +165,12 @@ test("agent workflow recalls memory, keeps deterministic findings, and writes le
   assert.equal(result.report.coverage?.checkedModules, 1);
   assert.equal(result.report.severityBreakdown?.critical > 0, true);
   assert.equal((result.report.actionPlan?.length ?? 0) > 0, true);
+  assert.equal((result.report.agentReviews?.length ?? 0) >= 5, true);
+  assert.equal((result.report.generatedExploitTests?.length ?? 0) > 0, true);
+  assert.equal(result.report.sourceConsistency?.level, "module_name_match");
+  assert.equal((result.report.memoryPlaybooks?.length ?? 0) > 0, true);
   assert.equal(result.memoryDiff.recalled.length, 1);
-  assert.equal(writtenLessons.length > 0, true);
+  assert.equal(writtenLessons.some((lesson) => lesson.includes("PLAYBOOK")), true);
 });
 
 test("demo package B can be marked memory-assisted after package A teaches a lesson", () => {
@@ -188,11 +201,16 @@ function sourceContextFromFiles(files: Record<string, string>): SourceContext {
     sizeBytes: Buffer.byteLength(content, "utf8"),
   }));
   return {
+    branch: "main",
     digest: "source-digest",
     fetchedAt: "2026-06-12T00:00:00.000Z",
     files: sourceFiles,
     moveFileCount: sourceFiles.length,
+    omittedMoveFileCount: 0,
+    packageRoots: ["."],
+    selectedRoot: ".",
     source: "github",
+    totalMoveFileCount: sourceFiles.length,
     url: "https://github.com/example/vault",
   };
 }

@@ -104,3 +104,9 @@ export function sourceSnippet(file: SourceFile, startLine: number, endLine: numb
 export function moduleNameFromPath(path: string) {
   return path.split(/[\\/]/).pop()?.replace(/\.move$/i, "") ?? "source";
 }
+
+export function extractSourceModuleNames(content: string) {
+  return Array.from(content.matchAll(/\bmodule\s+([A-Za-z0-9_]+::)?([A-Za-z_][A-Za-z0-9_]*)\s*\{/g))
+    .map((match) => match[2])
+    .filter((name): name is string => Boolean(name));
+}

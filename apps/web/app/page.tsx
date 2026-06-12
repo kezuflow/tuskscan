@@ -31,15 +31,31 @@ type PreparedAudit = {
 };
 
 type SourceSummary = {
+  branch?: string;
   digest: string;
   fileCount: number;
   moveFileCount: number;
+  omittedMoveFileCount?: number;
+  packageRoots?: string[];
+  pathPrefix?: string;
+  selectedRoot?: string;
+  totalMoveFileCount?: number;
   url: string;
 };
 
 type AuditReport = {
   actionPlan?: string[];
+  agentReviews?: Array<{
+    agent: string;
+    findingsReviewed: number;
+    output: string[];
+    status: string;
+  }>;
   artifacts?: Record<string, { blobId: string; contentHash: string; name: string }>;
+  calibration?: {
+    memoryMatchedFindings: number;
+    note: string;
+  };
   coverage?: {
     checkedModules: number;
     checkedMoveFiles: number;
@@ -48,6 +64,7 @@ type AuditReport = {
   };
   findings: Array<{
     attackPrerequisites?: string[];
+    calibratedConfidence?: string;
     category?: string;
     confidence: string;
     description?: string;
@@ -64,6 +81,7 @@ type AuditReport = {
     impact?: string;
     likelihood?: string;
     memoryAssisted: boolean;
+    memoryPlaybookIds?: string[];
     patchSuggestion?: string;
     recommendation: string;
     remediationSteps?: string[];
@@ -72,8 +90,31 @@ type AuditReport = {
     testSuggestions?: string[];
     title: string;
   }>;
+  generatedExploitTests?: Array<{
+    command: string;
+    findingId: string;
+    kind: string;
+    name: string;
+    notes: string[];
+    source?: string;
+    status: string;
+  }>;
+  memoryPlaybooks?: Array<{
+    findingId: string;
+    id: string;
+    query: string;
+    summary: string;
+  }>;
   riskScore: number;
   severityBreakdown?: Record<string, number>;
+  sourceConsistency?: {
+    deployedModules: string[];
+    level: string;
+    matchedModules: string[];
+    missingInSource: string[];
+    note: string;
+    sourceModules: string[];
+  };
   sourceSummary?: SourceSummary;
   summary: string;
   topRisks?: string[];
@@ -480,6 +521,43 @@ export default function Home() {
                   </p>
                 </div>
               ) : null}
+              <div>
+                <span>Source match</span>
+                <p>
+                  {audit.report.sourceConsistency
+                    ? `${audit.report.sourceConsistency.level}: ${audit.report.sourceConsistency.matchedModules.length}/${audit.report.sourceConsistency.deployedModules.length} modules`
+                    : "No source consistency check."}
+                </p>
+                {audit.report.sourceSummary?.selectedRoot ? (
+                  <small>{audit.report.sourceSummary.selectedRoot}</small>
+                ) : null}
+              </div>
+              <div>
+                <span>Generated tests</span>
+                <p>
+                  {audit.report.generatedExploitTests?.length ?? 0} exploit drafts
+                </p>
+                {audit.report.generatedExploitTests?.[0] ? (
+                  <small>{audit.report.generatedExploitTests[0].command}</small>
+                ) : null}
+              </div>
+              <div>
+                <span>Agent review</span>
+                <p>
+                  {audit.report.agentReviews?.filter((review) => review.status === "completed").length ?? 0}
+                  {" "}completed stages
+                </p>
+                <small>
+                  {audit.report.calibration?.memoryMatchedFindings ?? 0} MemWal matched findings
+                </small>
+              </div>
+              <div>
+                <span>Playbooks</span>
+                <p>{audit.report.memoryPlaybooks?.length ?? 0} stored patterns</p>
+                {audit.report.memoryPlaybooks?.[0] ? (
+                  <small>{audit.report.memoryPlaybooks[0].id}</small>
+                ) : null}
+              </div>
             </div>
           ) : null}
 
@@ -509,6 +587,9 @@ export default function Home() {
                 <span>
                   {finding.memoryAssisted ? "MemWal match" : "No memory match"}
                   {finding.likelihood ? <small>Likelihood: {finding.likelihood}</small> : null}
+                  {finding.calibratedConfidence ? (
+                    <small>Calibrated: {finding.calibratedConfidence}</small>
+                  ) : null}
                 </span>
               </div>
             ))}

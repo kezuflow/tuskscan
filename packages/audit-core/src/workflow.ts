@@ -49,6 +49,7 @@ export async function runAuditWorkflow(options: {
   });
   const remediatedFindings = runFixAgent(criticResult.findings);
   const reportResult = createAuditReport({
+    criticDecisions: criticResult.decisions,
     findings: remediatedFindings,
     memories: recalledMemories,
     packageSummary: options.packageSummary,

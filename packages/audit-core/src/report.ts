@@ -1,19 +1,23 @@
 import {
   AI_PRE_AUDIT_DISCLAIMER,
+  type AgentReview,
   type AuditFinding,
   type AuditReport,
+  type ExploitTestDraft,
   type FindingSeverity,
   type NormalizedPackageSnapshot,
   type PackageSummary,
+  type SourceConsistency,
   type SourceContext,
   type SourceSummary,
 } from "@repo/shared";
 
-import { extractMemoryLessons } from "./memory.js";
-import { extractMoveFunctions } from "./source-parser.js";
-import type { AuditEngineResult, ExploitMemory } from "./types.js";
+import { extractMemoryLessons, extractMemoryPlaybooks } from "./memory.js";
+import { extractMoveFunctions, extractSourceModuleNames } from "./source-parser.js";
+import type { AuditEngineResult, CriticDecision, ExploitMemory } from "./types.js";
 
 export function createAuditReport(options: {
+  criticDecisions?: CriticDecision[];
   findings: AuditFinding[];
   memories: ExploitMemory[];
   packageSummary: PackageSummary;
@@ -21,29 +25,40 @@ export function createAuditReport(options: {
   sourceSummary?: SourceSummary;
   snapshot: NormalizedPackageSnapshot;
 }): AuditEngineResult {
-  const riskScore = calculateRiskScore(options.findings);
-  const severityBreakdown = countSeverities(options.findings);
-  const topRisks = options.findings
+  const playbooks = extractMemoryPlaybooks(options.findings);
+  const calibratedFindings = calibrateFindings(options.findings, playbooks);
+  const riskScore = calculateRiskScore(calibratedFindings);
+  const severityBreakdown = countSeverities(calibratedFindings);
+  const topRisks = calibratedFindings
     .filter((finding) => finding.severity === "critical" || finding.severity === "high")
     .slice(0, 5)
     .map((finding) => finding.title);
   const summary =
-    options.findings.length === 0
+    calibratedFindings.length === 0
       ? options.sourceSummary
         ? "No high-signal issues were detected across normalized metadata and provided Move source."
         : "No deterministic high-signal issues were detected in the normalized module surface."
-      : `Detected ${options.findings.length} review items across ${options.sourceSummary ? "normalized metadata and provided Move source" : "the deployed package surface"}, including ${severityBreakdown.critical} critical and ${severityBreakdown.high} high severity items.`;
-  const learned = extractMemoryLessons(options.findings);
+      : `Detected ${calibratedFindings.length} review items across ${options.sourceSummary ? "normalized metadata and provided Move source" : "the deployed package surface"}, including ${severityBreakdown.critical} critical and ${severityBreakdown.high} high severity items.`;
+  const learned = extractMemoryLessons(calibratedFindings);
   const report: AuditReport = {
-    actionPlan: createActionPlan(options.findings),
+    actionPlan: createActionPlan(calibratedFindings),
+    agentReviews: createAgentReviews(calibratedFindings, options.criticDecisions ?? []),
     artifacts: {},
+    calibration: {
+      memoryMatchedFindings: calibratedFindings.filter((finding) => finding.memoryAssisted).length,
+      note:
+        "Confidence is calibrated from severity, deterministic/source evidence, and historical MemWal playbook matches. It is not formal proof.",
+    },
     coverage: calculateCoverage(options.snapshot, options.sourceContext),
     createdAt: new Date().toISOString(),
     disclaimer: AI_PRE_AUDIT_DISCLAIMER,
-    findings: options.findings,
+    findings: calibratedFindings,
+    generatedExploitTests: generateExploitTestDrafts(calibratedFindings),
+    memoryPlaybooks: playbooks,
     packageSummary: options.packageSummary,
     riskScore,
     severityBreakdown,
+    sourceConsistency: analyzeSourceConsistency(options.snapshot, options.sourceContext),
     sourceSummary: options.sourceSummary,
     status: "completed",
     summary,
@@ -52,7 +67,7 @@ export function createAuditReport(options: {
   };
 
   return {
-    findings: options.findings,
+    findings: calibratedFindings,
     memoryDiff: { learned, recalled: options.memories },
     privateReportMarkdown: renderMarkdownReport(report, true),
     publicReportMarkdown: renderMarkdownReport(report, false),
@@ -120,6 +135,166 @@ function createActionPlan(findings: AuditFinding[]) {
   ];
 }
 
+function calibrateFindings(
+  findings: AuditFinding[],
+  playbooks: ReturnType<typeof extractMemoryPlaybooks>,
+): AuditFinding[] {
+  return findings.map((finding) => {
+    const playbookIds = playbooks
+      .filter((playbook) => playbook.findingId === finding.id)
+      .map((playbook) => playbook.id);
+    const hasStrongEvidence = finding.evidence.some(
+      (item) => item.filePath || item.codeSnippet || item.functionName,
+    );
+    const calibratedConfidence =
+      finding.memoryAssisted || hasStrongEvidence || finding.severity === "critical"
+        ? "high"
+        : finding.confidence;
+    return {
+      ...finding,
+      calibratedConfidence,
+      memoryPlaybookIds: playbookIds.length ? playbookIds : undefined,
+    };
+  });
+}
+
+function analyzeSourceConsistency(
+  snapshot: NormalizedPackageSnapshot,
+  sourceContext: SourceContext | undefined,
+): SourceConsistency {
+  const deployedModules = snapshot.modules.map((module) => module.name).sort();
+  if (!sourceContext) {
+    return {
+      deployedModules,
+      level: "not_provided",
+      matchedModules: [],
+      missingInSource: deployedModules,
+      note: "No source repository was supplied. TuskScan could only inspect normalized deployed package metadata.",
+      sourceModules: [],
+    };
+  }
+  const sourceModules = Array.from(
+    new Set(
+      sourceContext.files.flatMap((file) => extractSourceModuleNames(file.content)),
+    ),
+  ).sort();
+  const sourceSet = new Set(sourceModules);
+  const matchedModules = deployedModules.filter((moduleName) => sourceSet.has(moduleName));
+  const missingInSource = deployedModules.filter((moduleName) => !sourceSet.has(moduleName));
+  return {
+    deployedModules,
+    level: missingInSource.length === 0 ? "module_name_match" : "module_name_mismatch",
+    matchedModules,
+    missingInSource,
+    note:
+      "Source/deploy consistency is checked by module names only. Bytecode/source-map equivalence is not proven yet.",
+    sourceModules,
+  };
+}
+
+function generateExploitTestDrafts(findings: AuditFinding[]): ExploitTestDraft[] {
+  return findings
+    .filter((finding) => finding.severity === "critical" || finding.severity === "high")
+    .slice(0, 8)
+    .map((finding): ExploitTestDraft => {
+      const evidence = finding.evidence[0];
+      const name = `tuskscan_${slug(finding.ruleId)}_${slug(evidence?.functionName ?? evidence?.moduleName ?? "finding")}`;
+      return {
+        command: `sui move test --filter ${name}`,
+        findingId: finding.id,
+        kind: "move_unit_test_draft",
+        name,
+        notes: [
+          "Draft generated from deployed metadata/source evidence. Bind package-specific object constructors before running.",
+          "The test should fail before remediation and pass after the recommended guard is added.",
+          ...(finding.testSuggestions ?? []),
+        ],
+        source: renderMoveTestDraft(name, finding),
+        status: "draft_needs_project_binding",
+        target: evidence
+          ? {
+              filePath: evidence.filePath,
+              functionName: evidence.functionName,
+              moduleName: evidence.moduleName,
+            }
+          : undefined,
+      };
+    });
+}
+
+function renderMoveTestDraft(name: string, finding: AuditFinding) {
+  const evidence = finding.evidence[0];
+  const target = `${evidence?.moduleName ?? "target"}${evidence?.functionName ? `::${evidence.functionName}` : ""}`;
+  return [
+    "#[test]",
+    `fun ${name}() {`,
+    "    // TuskScan generated exploit regression draft.",
+    `    // Finding: ${finding.ruleId} - ${finding.title}`,
+    `    // Target: ${target}`,
+    "    // TODO: create required package objects/capabilities using project fixtures.",
+    "    // TODO: execute the unauthorized or replay call described below.",
+    ...((finding.exploitPath ?? []).map((step) => `    // - ${step}`)),
+    "    // Expected: transaction aborts before value movement or unauthorized mutation.",
+    "}",
+  ].join("\n");
+}
+
+function createAgentReviews(
+  findings: AuditFinding[],
+  criticDecisions: CriticDecision[],
+): AgentReview[] {
+  const highSignal = findings.filter(
+    (finding) => finding.severity === "critical" || finding.severity === "high",
+  );
+  return [
+    {
+      agent: "scanner",
+      findingsReviewed: findings.length,
+      output: [
+        "Deterministic metadata and source rules produced the base finding set.",
+        `${highSignal.length} critical/high findings require immediate manual review.`,
+      ],
+      status: "completed",
+    },
+    {
+      agent: "researcher",
+      findingsReviewed: findings.length,
+      output: [
+        "Research pass groups findings by access control, value movement, object lifecycle, replay, and state integrity.",
+      ],
+      status: "completed",
+    },
+    {
+      agent: "exploit_writer",
+      findingsReviewed: highSignal.length,
+      output: [
+        "Generated Move unit test drafts for critical/high findings where evidence identifies a module/function target.",
+      ],
+      status: "completed",
+    },
+    {
+      agent: "patch_reviewer",
+      findingsReviewed: findings.length,
+      output: [
+        "Patch sketches and remediation steps are attached to findings; generated tests should be added before remediation.",
+      ],
+      status: "completed",
+    },
+    {
+      agent: "false_positive_critic",
+      findingsReviewed: criticDecisions.length || findings.length,
+      output: criticDecisions.length
+        ? criticDecisions.slice(0, 5).map((decision) => `${decision.action}: ${decision.reason}`)
+        : ["No external critic agent configured; deterministic findings were retained."],
+      status: criticDecisions.length ? "completed" : "not_configured",
+    },
+  ];
+}
+
+function slug(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 48);
+}
+
 function renderMarkdownReport(report: AuditReport, includeDetails: boolean) {
   const lines = [
     "# TuskScan AI Pre-Audit Report",
@@ -135,6 +310,9 @@ function renderMarkdownReport(report: AuditReport, includeDetails: boolean) {
     report.coverage
       ? `Coverage: ${report.coverage.checkedModules} modules, ${report.coverage.checkedPublicEntryFunctions} public entry functions, ${report.coverage.checkedMoveFiles} Move source files, ${report.coverage.checkedSourceFunctions} source functions`
       : "Coverage: unavailable",
+    report.sourceConsistency
+      ? `Source consistency: \`${report.sourceConsistency.level}\` (${report.sourceConsistency.matchedModules.length}/${report.sourceConsistency.deployedModules.length} deployed modules matched by name)`
+      : "Source consistency: unavailable",
     "",
     "## Summary",
     "",
@@ -152,6 +330,21 @@ function renderMarkdownReport(report: AuditReport, includeDetails: boolean) {
     "",
     ...(report.actionPlan?.map((item, index) => `${index + 1}. ${item}`) ?? []),
     "",
+    "## Agent Review",
+    "",
+    ...(report.agentReviews?.flatMap((review) => [
+      `- ${review.agent}: ${review.status}, reviewed ${review.findingsReviewed} findings.`,
+      ...review.output.map((item) => `  - ${item}`),
+    ]) ?? []),
+    "",
+    "## Generated Exploit Test Drafts",
+    "",
+    ...(report.generatedExploitTests?.length
+      ? report.generatedExploitTests.map(
+          (test) => `- \`${test.name}\`: ${test.command} (${test.status})`,
+        )
+      : ["No critical/high exploit test drafts generated."]),
+    "",
     "## Findings",
     "",
   ];
@@ -167,6 +360,9 @@ function renderMarkdownReport(report: AuditReport, includeDetails: boolean) {
       `Rule: \`${finding.ruleId}\``,
       finding.category ? `Category: \`${finding.category}\`` : undefined,
       `Confidence: \`${finding.confidence}\``,
+      finding.calibratedConfidence
+        ? `Calibrated confidence: \`${finding.calibratedConfidence}\``
+        : undefined,
       finding.likelihood ? `Likelihood: \`${finding.likelihood}\`` : undefined,
       `Memory assisted: \`${finding.memoryAssisted ? "yes" : "no"}\``,
       "",

@@ -1067,20 +1067,21 @@ async function fetchSourceContext(sourceUrl: string | undefined): Promise<Source
 
   const branch = parsed.branch ?? (await fetchGithubDefaultBranch(parsed));
   const tree = await fetchGithubTree({ ...parsed, branch });
+  const packageRoots = discoverMovePackageRoots(tree.map((item) => item.path));
+  const selectedRoot = selectMovePackageRoot(packageRoots, parsed.pathPrefix);
   const movePaths = tree
     .filter(
       (item) =>
         item.type === "blob" &&
         item.path.endsWith(".move") &&
-        (!parsed.pathPrefix || item.path.startsWith(`${parsed.pathPrefix}/`)),
+        pathIsUnderSelectedScope(item.path, selectedRoot, parsed.pathPrefix),
     )
     .map((item) => item.path)
-    .sort()
-    .slice(0, 80);
+    .sort();
 
   const files = (
     await Promise.all(
-      movePaths.map(async (path) => {
+      movePaths.slice(0, 80).map(async (path) => {
         const content = await fetchGithubRaw({ ...parsed, branch, path });
         if (content.length > 250_000) return undefined;
         return { content, path, sizeBytes: Buffer.byteLength(content, "utf8") };
@@ -1090,10 +1091,16 @@ async function fetchSourceContext(sourceUrl: string | undefined): Promise<Source
 
   const limitedFiles = limitSourceBytes(files, 1_500_000);
   const unsignedContext = {
+    branch,
     fetchedAt: new Date().toISOString(),
     files: limitedFiles,
     moveFileCount: limitedFiles.length,
+    omittedMoveFileCount: Math.max(0, movePaths.length - limitedFiles.length),
+    packageRoots,
+    pathPrefix: parsed.pathPrefix,
+    selectedRoot,
     source: "github" as const,
+    totalMoveFileCount: movePaths.length,
     url: sourceUrl,
   };
 
@@ -1101,6 +1108,40 @@ async function fetchSourceContext(sourceUrl: string | undefined): Promise<Source
     ...unsignedContext,
     digest: await sha256Hex(stableJson(unsignedContext)),
   };
+}
+
+function discoverMovePackageRoots(paths: string[]) {
+  return paths
+    .filter((path) => path.endsWith("Move.toml"))
+    .map((path) => path.replace(/\/?Move\.toml$/, ""))
+    .map((path) => path || ".")
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function selectMovePackageRoot(packageRoots: string[], pathPrefix: string | undefined) {
+  if (pathPrefix) {
+    const normalizedPrefix = pathPrefix.replace(/\/$/, "");
+    const exact = packageRoots.find((root) => root === normalizedPrefix);
+    if (exact) return exact;
+    const nested = packageRoots.find((root) => root.startsWith(`${normalizedPrefix}/`));
+    if (nested) return nested;
+    return normalizedPrefix;
+  }
+  if (packageRoots.length === 1) return packageRoots[0];
+  const preferred = packageRoots.find((root) =>
+    /^(move|contracts|contract|sources|sui|packages\/move|apps\/move)$/i.test(root),
+  );
+  return preferred ?? packageRoots[0];
+}
+
+function pathIsUnderSelectedScope(
+  path: string,
+  selectedRoot: string | undefined,
+  pathPrefix: string | undefined,
+) {
+  const scope = selectedRoot ?? pathPrefix;
+  if (!scope || scope === ".") return true;
+  return path === scope || path.startsWith(`${scope}/`);
 }
 
 function isGithubUrl(value: string) {
@@ -1192,9 +1233,15 @@ function limitSourceBytes(files: SourceContext["files"], maxBytes: number) {
 
 function summarizeSourceContext(sourceContext: SourceContext): SourceSummary {
   return {
+    branch: sourceContext.branch,
     digest: sourceContext.digest,
     fileCount: sourceContext.files.length,
     moveFileCount: sourceContext.moveFileCount,
+    omittedMoveFileCount: sourceContext.omittedMoveFileCount,
+    packageRoots: sourceContext.packageRoots,
+    pathPrefix: sourceContext.pathPrefix,
+    selectedRoot: sourceContext.selectedRoot,
+    totalMoveFileCount: sourceContext.totalMoveFileCount,
     url: sourceContext.url,
   };
 }
@@ -1448,7 +1495,10 @@ async function runLlmFindingAgent(
       packageSummary: input.packageSummary,
       source: input.sourceContext
         ? {
-            snippets: compactSourceContext(input.sourceContext),
+            snippets: compactSourceContext(
+              input.sourceContext,
+              input.deterministicFindings,
+            ),
             summary: summarizeSourceContext(input.sourceContext),
           }
         : undefined,
@@ -1590,8 +1640,21 @@ function compactSnapshot(snapshot: NormalizedPackageSnapshot) {
   };
 }
 
-function compactSourceContext(sourceContext: SourceContext) {
-  return sourceContext.files.slice(0, 20).map((file) => ({
+function compactSourceContext(
+  sourceContext: SourceContext,
+  findings: AuditFinding[] = [],
+) {
+  const evidencePaths = new Set(
+    findings.flatMap((finding) =>
+      finding.evidence.map((evidence) => evidence.filePath).filter(Boolean),
+    ),
+  );
+  const prioritized = [...sourceContext.files].sort((left, right) => {
+    const leftScore = evidencePaths.has(left.path) ? 0 : 1;
+    const rightScore = evidencePaths.has(right.path) ? 0 : 1;
+    return leftScore - rightScore || left.path.localeCompare(right.path);
+  });
+  return prioritized.slice(0, 20).map((file) => ({
     content: file.content.split(/\r?\n/).slice(0, 180).join("\n").slice(0, 12_000),
     path: file.path,
     sizeBytes: file.sizeBytes,

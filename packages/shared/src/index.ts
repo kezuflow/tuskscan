@@ -71,18 +71,30 @@ export type SourceFile = {
 };
 
 export type SourceContext = {
+  branch?: string;
   digest: string;
   fetchedAt: string;
   files: SourceFile[];
   moveFileCount: number;
+  omittedMoveFileCount?: number;
+  packageRoots?: string[];
+  pathPrefix?: string;
+  selectedRoot?: string;
   source: "github";
+  totalMoveFileCount?: number;
   url: string;
 };
 
 export type SourceSummary = {
+  branch?: string;
   digest: string;
   fileCount: number;
   moveFileCount: number;
+  omittedMoveFileCount?: number;
+  packageRoots?: string[];
+  pathPrefix?: string;
+  selectedRoot?: string;
+  totalMoveFileCount?: number;
   url: string;
 };
 
@@ -104,6 +116,7 @@ export type MemoryReference = {
 
 export type AuditFinding = {
   attackPrerequisites?: string[];
+  calibratedConfidence?: FindingConfidence;
   category?: string;
   confidence: FindingConfidence;
   description: string;
@@ -113,6 +126,7 @@ export type AuditFinding = {
   impact?: string;
   likelihood?: FindingConfidence;
   memoryAssisted: boolean;
+  memoryPlaybookIds?: string[];
   memoryReferences: MemoryReference[];
   patchSuggestion?: string;
   recommendation: string;
@@ -121,6 +135,44 @@ export type AuditFinding = {
   severity: FindingSeverity;
   testSuggestions?: string[];
   title: string;
+};
+
+export type ExploitTestDraft = {
+  command: string;
+  findingId: string;
+  kind: "move_unit_test_draft";
+  name: string;
+  notes: string[];
+  source?: string;
+  status: "draft_needs_project_binding";
+  target?: {
+    filePath?: string;
+    functionName?: string;
+    moduleName: string;
+  };
+};
+
+export type AgentReview = {
+  agent: "scanner" | "researcher" | "exploit_writer" | "patch_reviewer" | "false_positive_critic";
+  findingsReviewed: number;
+  output: string[];
+  status: "completed" | "not_configured";
+};
+
+export type SourceConsistency = {
+  deployedModules: string[];
+  level: "not_provided" | "module_name_match" | "module_name_mismatch";
+  matchedModules: string[];
+  missingInSource: string[];
+  note: string;
+  sourceModules: string[];
+};
+
+export type MemoryPlaybook = {
+  findingId: string;
+  id: string;
+  query: string;
+  summary: string;
 };
 
 export type AuditReportArtifacts = {
@@ -142,7 +194,12 @@ export type ArtifactPointer = {
 
 export type AuditReport = {
   actionPlan?: string[];
+  agentReviews?: AgentReview[];
   artifacts: AuditReportArtifacts;
+  calibration?: {
+    memoryMatchedFindings: number;
+    note: string;
+  };
   coverage?: {
     checkedModules: number;
     checkedMoveFiles: number;
@@ -152,9 +209,12 @@ export type AuditReport = {
   createdAt: string;
   disclaimer: string;
   findings: AuditFinding[];
+  generatedExploitTests?: ExploitTestDraft[];
+  memoryPlaybooks?: MemoryPlaybook[];
   packageSummary: PackageSummary;
   riskScore: number;
   severityBreakdown?: Record<FindingSeverity, number>;
+  sourceConsistency?: SourceConsistency;
   sourceSummary?: SourceSummary;
   status: AuditStatus;
   summary: string;

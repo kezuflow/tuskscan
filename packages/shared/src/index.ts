@@ -87,6 +87,7 @@ export type SourceSummary = {
 };
 
 export type FindingEvidence = {
+  codeSnippet?: string;
   detail: string;
   filePath?: string;
   functionName?: string;
@@ -102,17 +103,23 @@ export type MemoryReference = {
 };
 
 export type AuditFinding = {
+  attackPrerequisites?: string[];
+  category?: string;
   confidence: FindingConfidence;
   description: string;
   evidence: FindingEvidence[];
   exploitPath?: string[];
   id: string;
+  impact?: string;
+  likelihood?: FindingConfidence;
   memoryAssisted: boolean;
   memoryReferences: MemoryReference[];
   patchSuggestion?: string;
   recommendation: string;
+  remediationSteps?: string[];
   ruleId: string;
   severity: FindingSeverity;
+  testSuggestions?: string[];
   title: string;
 };
 
@@ -134,15 +141,24 @@ export type ArtifactPointer = {
 };
 
 export type AuditReport = {
+  actionPlan?: string[];
   artifacts: AuditReportArtifacts;
+  coverage?: {
+    checkedModules: number;
+    checkedMoveFiles: number;
+    checkedPublicEntryFunctions: number;
+    checkedSourceFunctions: number;
+  };
   createdAt: string;
   disclaimer: string;
   findings: AuditFinding[];
   packageSummary: PackageSummary;
   riskScore: number;
+  severityBreakdown?: Record<FindingSeverity, number>;
   sourceSummary?: SourceSummary;
   status: AuditStatus;
   summary: string;
+  topRisks?: string[];
   visibility: Visibility;
 };
 

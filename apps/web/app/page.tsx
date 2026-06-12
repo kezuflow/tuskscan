@@ -38,11 +38,21 @@ type SourceSummary = {
 };
 
 type AuditReport = {
+  actionPlan?: string[];
   artifacts?: Record<string, { blobId: string; contentHash: string; name: string }>;
+  coverage?: {
+    checkedModules: number;
+    checkedMoveFiles: number;
+    checkedPublicEntryFunctions: number;
+    checkedSourceFunctions: number;
+  };
   findings: Array<{
+    attackPrerequisites?: string[];
+    category?: string;
     confidence: string;
     description?: string;
     evidence: Array<{
+      codeSnippet?: string;
       detail: string;
       filePath?: string;
       functionName?: string;
@@ -51,16 +61,22 @@ type AuditReport = {
       moduleName: string;
     }>;
     exploitPath?: string[];
+    impact?: string;
+    likelihood?: string;
     memoryAssisted: boolean;
     patchSuggestion?: string;
     recommendation: string;
+    remediationSteps?: string[];
     ruleId: string;
     severity: string;
+    testSuggestions?: string[];
     title: string;
   }>;
   riskScore: number;
+  severityBreakdown?: Record<string, number>;
   sourceSummary?: SourceSummary;
   summary: string;
+  topRisks?: string[];
 };
 
 type AuditJob = {
@@ -431,6 +447,42 @@ export default function Home() {
             </span>
           </div>
 
+          {audit?.report ? (
+            <div className={styles.reportSummary}>
+              <div>
+                <span>Top risks</span>
+                <ul>
+                  {(audit.report.topRisks?.length
+                    ? audit.report.topRisks
+                    : ["No critical or high severity risks detected."]
+                  ).map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <span>Action plan</span>
+                <ol>
+                  {(audit.report.actionPlan ?? []).slice(0, 4).map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ol>
+              </div>
+              {audit.report.coverage ? (
+                <div>
+                  <span>Coverage</span>
+                  <p>
+                    {audit.report.coverage.checkedPublicEntryFunctions} public entries,
+                    {" "}
+                    {audit.report.coverage.checkedSourceFunctions} source functions,
+                    {" "}
+                    {audit.report.coverage.checkedMoveFiles} Move files.
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className={styles.table}>
             <div className={styles.tableHead}>
               <span>Severity</span>
@@ -445,13 +497,19 @@ export default function Home() {
                 </span>
                 <span>
                   <strong>{finding.title}</strong>
-                  <small>{finding.ruleId}</small>
+                  <small>
+                    {finding.category ? `${finding.category} / ` : ""}
+                    {finding.ruleId}
+                  </small>
                 </span>
                 <span>
                   {formatEvidence(finding.evidence[0])}
-                  {finding.exploitPath?.[0] ? <small>{finding.exploitPath[0]}</small> : null}
+                  {finding.impact ? <small>{finding.impact}</small> : null}
                 </span>
-                <span>{finding.memoryAssisted ? "MemWal match" : "No memory match"}</span>
+                <span>
+                  {finding.memoryAssisted ? "MemWal match" : "No memory match"}
+                  {finding.likelihood ? <small>Likelihood: {finding.likelihood}</small> : null}
+                </span>
               </div>
             ))}
           </div>

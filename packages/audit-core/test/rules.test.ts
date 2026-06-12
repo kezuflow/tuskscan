@@ -6,6 +6,7 @@ import {
   runAuditWorkflow,
   runDeterministicAudit,
 } from "../src/index.ts";
+import type { SourceContext } from "@repo/shared";
 import {
   demoPackageASnapshot,
   demoPackageBSnapshot,
@@ -68,26 +69,19 @@ test("memory references mark matched findings as memory-assisted", () => {
 });
 
 test("source-aware rules identify unauthenticated public transfer paths", () => {
-  const findings = runDeterministicAudit(safePackageSnapshot, [], {
-    digest: "source-digest",
-    fetchedAt: "2026-06-12T00:00:00.000Z",
-    files: [
-      {
-        content: [
-          "module demo::vault {",
-          "  public entry fun drain(vault: &mut Vault, recipient: address, ctx: &mut TxContext) {",
-          "    transfer::public_transfer(vault.coin, recipient);",
-          "  }",
-          "}",
-        ].join("\n"),
-        path: "sources/vault.move",
-        sizeBytes: 180,
-      },
-    ],
-    moveFileCount: 1,
-    source: "github",
-    url: "https://github.com/example/vault",
-  });
+  const findings = runDeterministicAudit(
+    safePackageSnapshot,
+    [],
+    sourceContextFromFiles({
+      "sources/vault.move": [
+        "module demo::vault {",
+        "  public entry fun drain(vault: &mut Vault, recipient: address, ctx: &mut TxContext) {",
+        "    transfer::public_transfer(vault.coin, recipient);",
+        "  }",
+        "}",
+      ].join("\n"),
+    }),
+  );
 
   const sourceFinding = findings.find(
     (finding) => finding.ruleId === "SRC_PUBLIC_TRANSFER_WITHOUT_AUTH",
@@ -95,7 +89,47 @@ test("source-aware rules identify unauthenticated public transfer paths", () => 
 
   assert.equal(sourceFinding?.severity, "critical");
   assert.equal(sourceFinding?.evidence[0]?.filePath, "sources/vault.move");
+  assert.equal(sourceFinding?.evidence[0]?.codeSnippet?.includes("public_transfer"), true);
+  assert.equal(sourceFinding?.impact?.includes("unauthorized caller"), true);
   assert.equal(sourceFinding?.patchSuggestion?.includes("AdminCap"), true);
+});
+
+test("source-aware rules identify advanced Sui Move exploit classes", () => {
+  const findings = runDeterministicAudit(
+    safePackageSnapshot,
+    [],
+    sourceContextFromFiles({
+      "sources/advanced.move": [
+        "module demo::advanced {",
+        "  public entry fun initialize(ctx: &mut TxContext) {",
+        "    let id = object::new(ctx);",
+        "  }",
+        "  public entry fun mint_anyone(recipient: address, ctx: &mut TxContext) {",
+        "    let coin = coin::mint(100, ctx);",
+        "    transfer::public_transfer(coin, recipient);",
+        "  }",
+        "  public entry fun draw_winner(clock: &Clock) {",
+        "    let slot = clock::timestamp_ms(clock) % 10;",
+        "  }",
+        "  public entry fun pick(items: &mut vector<u64>, index: u64) {",
+        "    vector::swap_remove(items, index);",
+        "  }",
+        "  entry public fun delete_receipt(receipt: Receipt) {",
+        "    let Receipt { id } = receipt;",
+        "    object::delete(id);",
+        "  }",
+        "}",
+      ].join("\n"),
+    }),
+  );
+  const ruleIds = new Set(findings.map((finding) => finding.ruleId));
+
+  assert.equal(ruleIds.has("SRC_REINITIALIZATION_RISK"), true);
+  assert.equal(ruleIds.has("SRC_TREASURY_CAP_EXPOSURE"), true);
+  assert.equal(ruleIds.has("SRC_ARBITRARY_RECIPIENT_TRANSFER"), true);
+  assert.equal(ruleIds.has("SRC_PREDICTABLE_RANDOMNESS"), true);
+  assert.equal(ruleIds.has("SRC_UNCHECKED_VECTOR_ACCESS"), true);
+  assert.equal(ruleIds.has("SRC_OBJECT_DELETE_WITHOUT_AUTH"), true);
 });
 
 test("agent workflow recalls memory, keeps deterministic findings, and writes lessons", async () => {
@@ -119,6 +153,9 @@ test("agent workflow recalls memory, keeps deterministic findings, and writes le
 
   assert.equal(result.report.disclaimer.includes("not a professional security audit"), true);
   assert.equal(result.criticDecisions.every((decision) => decision.action === "keep"), true);
+  assert.equal(result.report.coverage?.checkedModules, 1);
+  assert.equal(result.report.severityBreakdown?.critical > 0, true);
+  assert.equal((result.report.actionPlan?.length ?? 0) > 0, true);
   assert.equal(result.memoryDiff.recalled.length, 1);
   assert.equal(writtenLessons.length > 0, true);
 });
@@ -143,3 +180,19 @@ test("demo package B can be marked memory-assisted after package A teaches a les
     true,
   );
 });
+
+function sourceContextFromFiles(files: Record<string, string>): SourceContext {
+  const sourceFiles = Object.entries(files).map(([path, content]) => ({
+    content,
+    path,
+    sizeBytes: Buffer.byteLength(content, "utf8"),
+  }));
+  return {
+    digest: "source-digest",
+    fetchedAt: "2026-06-12T00:00:00.000Z",
+    files: sourceFiles,
+    moveFileCount: sourceFiles.length,
+    source: "github",
+    url: "https://github.com/example/vault",
+  };
+}

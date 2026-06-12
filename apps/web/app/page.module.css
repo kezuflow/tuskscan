@@ -302,6 +302,42 @@
   border-radius: 8px;
 }
 
+.reportSummary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(220px, 0.65fr);
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.reportSummary div {
+  border: 1px solid #e2e8df;
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.reportSummary span {
+  display: block;
+  margin-bottom: 8px;
+  color: #66736c;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.reportSummary ul,
+.reportSummary ol {
+  display: grid;
+  gap: 7px;
+  margin-left: 18px;
+  color: #17201d;
+  line-height: 1.45;
+}
+
+.reportSummary p {
+  color: #17201d;
+  line-height: 1.5;
+}
+
 .tableHead,
 .tableRow {
   display: grid;
@@ -369,7 +405,8 @@
 @media (max-width: 900px) {
   .shell,
   .grid,
-  .formGrid {
+  .formGrid,
+  .reportSummary {
     grid-template-columns: 1fr;
   }
 

@@ -1353,12 +1353,20 @@ type LlmAgentBundle = {
 };
 
 type LlmFindingDraft = {
+  attackPrerequisites?: unknown;
+  category?: unknown;
   confidence?: unknown;
   description?: unknown;
   evidence?: unknown;
+  exploitPath?: unknown;
+  impact?: unknown;
+  likelihood?: unknown;
+  patchSuggestion?: unknown;
   recommendation?: unknown;
+  remediationSteps?: unknown;
   ruleId?: unknown;
   severity?: unknown;
+  testSuggestions?: unknown;
   title?: unknown;
 };
 
@@ -1435,7 +1443,7 @@ async function runLlmFindingAgent(
         title: finding.title,
       })),
       expectedShape:
-        "{ findings: [{ title, severity, confidence, description, recommendation, ruleId, evidence: [{ moduleName, functionName?, structName?, filePath?, lineStart?, lineEnd?, detail }] }] }",
+        "{ findings: [{ title, severity, confidence, likelihood, category, impact, description, recommendation, patchSuggestion, remediationSteps: string[], testSuggestions: string[], exploitPath: string[], ruleId, evidence: [{ moduleName, functionName?, structName?, filePath?, lineStart?, lineEnd?, codeSnippet?, detail }] }] }",
       memories: input.memories.slice(0, 6),
       packageSummary: input.packageSummary,
       source: input.sourceContext
@@ -1497,21 +1505,29 @@ function normalizeAgentFinding(
   const evidence = normalizeEvidence(draft.evidence, input.snapshot);
   const memoryReferences = input.memories.slice(0, 3).map(({ id, summary }) => ({ id, summary }));
   return {
+    attackPrerequisites: stringArrayOr(draft.attackPrerequisites),
+    category: optionalString(draft.category),
     confidence: confidenceOr(draft.confidence, "medium"),
     description: stringOr(
       draft.description,
       "An AI agent flagged this area for manual Move security review.",
     ),
     evidence,
+    exploitPath: stringArrayOr(draft.exploitPath),
     id: `ai:${agent}:${index}:${slug(title)}`,
+    impact: optionalString(draft.impact),
+    likelihood: confidenceOr(draft.likelihood, "medium"),
     memoryAssisted: memoryReferences.length > 0,
     memoryReferences,
+    patchSuggestion: optionalString(draft.patchSuggestion),
     recommendation: stringOr(
       draft.recommendation,
       "Review the affected module manually and add explicit authorization or invariant checks.",
     ),
+    remediationSteps: stringArrayOr(draft.remediationSteps),
     ruleId,
     severity: severityOr(draft.severity, agent === "exploit" ? "high" : "medium") ?? "medium",
+    testSuggestions: stringArrayOr(draft.testSuggestions),
     title,
   };
 }
@@ -1528,6 +1544,7 @@ function normalizeEvidence(value: unknown, snapshot: NormalizedPackageSnapshot) 
     }
     const evidence = item as Record<string, unknown>;
     return {
+      codeSnippet: optionalString(evidence.codeSnippet),
       detail: stringOr(evidence.detail, "AI agent evidence from normalized metadata."),
       filePath: optionalString(evidence.filePath),
       functionName: optionalString(evidence.functionName),
@@ -1606,6 +1623,14 @@ function stringOr(value: unknown, fallback: string) {
 
 function optionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function stringArrayOr(value: unknown) {
+  return Array.isArray(value)
+    ? value.filter(
+        (item): item is string => typeof item === "string" && item.trim().length > 0,
+      )
+    : undefined;
 }
 
 function optionalNumber(value: unknown) {

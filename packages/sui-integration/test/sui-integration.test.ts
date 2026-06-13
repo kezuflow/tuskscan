@@ -78,7 +78,7 @@ test("verifies paid audit jobs against Sui transaction and object data", async (
       network: "testnet",
       operatorAddress: "0x9",
       packageDigest: "snapshot-hash",
-      packageId: "0x1234",
+      packageId: "github:example/repo/move/package#0xabc",
       payer: "0x8",
       priceMist: "100000000",
       rpcUrl: "http://127.0.0.1:1",
@@ -100,7 +100,7 @@ test("rejects paid audit jobs that did not credit the configured operator", asyn
           network: "testnet",
           operatorAddress: "0x9",
           packageDigest: "snapshot-hash",
-          packageId: "0x1234",
+          packageId: "github:example/repo/move/package#0xabc",
           payer: "0x8",
           priceMist: "100000000",
           rpcUrl: "http://127.0.0.1:1",
@@ -132,7 +132,7 @@ function mockSuiPaymentRpc(options: { operatorWasPaid: boolean }) {
   const contractPackageId = normalizeSuiObjectId("0x7");
   const jobObjectId = normalizeSuiObjectId("0xbeef");
   const operatorAddress = normalizeSuiObjectId("0x9");
-  const packageId = normalizeSuiObjectId("0x1234");
+  const packageId = "github:example/repo/move/package#0xabc";
   const payer = normalizeSuiObjectId("0x8");
 
   globalThis.fetch = (async (_url, init) => {

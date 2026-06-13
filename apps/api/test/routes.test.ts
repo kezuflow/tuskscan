@@ -4,7 +4,7 @@ import type { Server } from "node:http";
 import test from "node:test";
 
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
-import type { NormalizedPackageSnapshot } from "@repo/shared";
+import type { NormalizedPackageSnapshot, SourceContext } from "@repo/shared";
 import { InMemoryExploitMemoryStore, InMemoryWalrusStore } from "@repo/storage";
 
 import { InMemoryAuditJobStore, createTuskscanApiServer } from "../src/index.ts";
@@ -44,16 +44,69 @@ const fixtureSnapshot: NormalizedPackageSnapshot = {
   source: "sui-normalized-modules",
 };
 
-test("prepare rejects repository URLs as package ids", async () => {
-  const { baseUrl, close } = await startTestServer();
+test("prepare resolves a repository URL with published package metadata", async () => {
+  const { baseUrl, close } = await startTestServer({
+    sourceContext: {
+      branch: "main",
+      digest: "source-digest",
+      fetchedAt: "2026-06-12T00:00:00.000Z",
+      files: [],
+      moveFileCount: 1,
+      packageRoots: ["move/demo-package-a"],
+      pathPrefix: "move/demo-package-a",
+      publishedPackageId: "0x5678",
+      selectedRoot: "move/demo-package-a",
+      source: "github",
+      totalMoveFileCount: 1,
+      url: "https://github.com/example/repo/tree/main/move/demo-package-a",
+    },
+  });
   try {
     const response = await postJson(`${baseUrl}/api/audits/prepare`, {
-      packageId: "https://github.com/example/repo",
+      sourceUrl: "https://github.com/example/repo/tree/main/move/demo-package-a",
     });
     const body = await response.json();
 
-    assert.equal(response.status, 400);
-    assert.match(body.error, /package ID/);
+    assert.equal(response.status, 200);
+    assert.match(body.packageSummary.packageId, /^github:example\/repo\/move\/demo-package-a@main#/);
+    assert.equal(body.sourceSummary.publishedPackageId, "0x5678");
+  } finally {
+    await close();
+  }
+});
+
+test("prepare accepts repository URLs without published package metadata", async () => {
+  const { baseUrl, close } = await startTestServer({
+    sourceContext: {
+      branch: "main",
+      digest: "0xabcdef1234567890",
+      fetchedAt: "2026-06-12T00:00:00.000Z",
+      files: [
+        {
+          content: "module demo::vault { public entry fun withdraw_all(treasury: &mut Treasury) {} struct Treasury has key, store { id: UID } }",
+          path: "move/demo-package-a/sources/vault.move",
+          sizeBytes: 118,
+        },
+      ],
+      moveFileCount: 1,
+      packageRoots: ["move/demo-package-a"],
+      pathPrefix: "move/demo-package-a",
+      selectedRoot: "move/demo-package-a",
+      source: "github",
+      totalMoveFileCount: 1,
+      url: "https://github.com/example/repo/tree/main/move/demo-package-a",
+    },
+  });
+  try {
+    const response = await postJson(`${baseUrl}/api/audits/prepare`, {
+      sourceUrl: "https://github.com/example/repo/tree/main/move/demo-package-a",
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.match(body.packageSummary.packageId, /^github:example\/repo\/move\/demo-package-a@main#/);
+    assert.equal(body.packageSummary.moduleCount, 1);
+    assert.equal(body.sourceSummary.publishedPackageId, undefined);
   } finally {
     await close();
   }
@@ -209,7 +262,7 @@ test("expired audit job locks can be reclaimed", async () => {
   assert.equal(claimed?.lockedBy, "worker-b");
 });
 
-async function startTestServer() {
+async function startTestServer(options: { sourceContext?: SourceContext } = {}) {
   const server = createTuskscanApiServer({
     config: {
       environment: "localhost",
@@ -218,11 +271,16 @@ async function startTestServer() {
       tuskscanPackageId:
         "0x0000000000000000000000000000000000000000000000000000000000000009",
     },
+    auditStore: new InMemoryAuditJobStore(),
     fetchPackage: async ({ network, packageId }) => ({
       ...fixtureSnapshot,
       network,
       packageId,
     }),
+    fetchSourceContext: async (sourceUrl) =>
+      sourceUrl && options.sourceContext
+        ? { ...options.sourceContext, url: sourceUrl }
+        : undefined,
     finalizer: async () => ({
       digest: "finalize-digest",
       reportObjectId: "0xcafe",

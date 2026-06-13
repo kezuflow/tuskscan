@@ -13,6 +13,9 @@ import { SuiJsonRpcClient, getJsonRpcFullnodeUrl } from "@mysten/sui/jsonRpc";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { verifyPersonalMessageSignature } from "@mysten/sui/verify";
 import {
+  extractMoveFunctions,
+  extractSourceModuleNames,
+  moduleNameFromPath,
   runAuditWorkflow,
   type AuditCriticAgent,
   type AuditFindingAgent,
@@ -29,6 +32,10 @@ import {
   type FindingConfidence,
   type FindingSeverity,
   type Network,
+  type NormalizedFunction,
+  type NormalizedModule,
+  type NormalizedParameter,
+  type NormalizedStruct,
   type NormalizedPackageSnapshot,
   type PackageSummary,
   type SandboxCommandResult,
@@ -38,7 +45,6 @@ import {
 } from "@repo/shared";
 import {
   HttpWalrusStore,
-  InMemoryExploitMemoryStore,
   InMemoryWalrusStore,
   MemWalMemoryStore,
   recallExploitMemories,
@@ -90,6 +96,7 @@ type ApiDependencies = {
   auditProcessor?: AuditJobProcessor;
   config?: RuntimeConfig;
   fetchPackage?: typeof fetchNormalizedPackage;
+  fetchSourceContext?: typeof fetchSourceContext;
   finalizer?: AuditReportFinalizer;
   findingAgent?: AuditFindingAgent;
   criticAgent?: AuditCriticAgent;
@@ -280,17 +287,12 @@ function normalizeEnvValue(raw: string) {
 
 export function validateRuntimeConfig(config: RuntimeConfig) {
   return {
-    database: config.databaseUrl
-      ? "production"
-      : isLocalhost(config)
-        ? "localhost"
-        : "missing",
+    database: config.databaseUrl ? "production" : "missing",
     environment: config.environment,
-    memwal: isLocalhost(config)
-        ? "localhost"
-        : config.memwalPrivateKey && config.memwalAccountId
-          ? "production"
-          : "missing",
+    memwal: config.memwalPrivateKey && config.memwalAccountId
+      ? "production"
+      : "missing",
+    network: config.network,
     llmAgents: config.llmApiKey ? "production" : "disabled",
     moveTestSandbox: config.runMoveTests ? "enabled" : "disabled",
     auditConfig: config.tuskscanConfigId ? "production" : "missing",
@@ -314,6 +316,9 @@ export function validateRuntimeConfig(config: RuntimeConfig) {
 
 export function createTuskscanApiServer(dependencies: ApiDependencies = {}) {
   const config = dependencies.config ?? loadRuntimeConfig();
+  if (!dependencies.config) {
+    assertRuntimeRequirements(config);
+  }
   const auditStore = dependencies.auditStore ?? createAuditJobStore(config);
   const fetchPackage = dependencies.fetchPackage ?? fetchNormalizedPackage;
   const auditProcessor =
@@ -412,18 +417,32 @@ export function createTuskscanApiServer(dependencies: ApiDependencies = {}) {
           return;
         }
 
-        const snapshot = await fetchPackage({
-          network: validation.network,
-          packageId: validation.packageId,
-          rpcUrl: getRpcUrl(config),
-        });
-        const sourceContext = await fetchSourceContext(validation.sourceUrl);
+        const sourceContext =
+          (dependencies.fetchSourceContext ?? fetchSourceContext)(
+            validation.sourceUrl,
+            validation.network,
+          );
+        const resolvedSourceContext = await sourceContext;
+        if (!validation.packageId && !resolvedSourceContext) {
+          sendJson(response, 400, {
+            error: "Paste a GitHub repository URL or a deployed Sui package address.",
+          });
+          return;
+        }
+
+        const snapshot = resolvedSourceContext
+          ? await createSourcePackageSnapshot(resolvedSourceContext, validation.network)
+          : await fetchPackage({
+              network: validation.network,
+              packageId: validation.packageId!,
+              rpcUrl: getRpcUrl(config),
+            });
         const packageSummary = summarizePackage(snapshot);
         sendJson(response, 200, {
           disclaimer: AI_PRE_AUDIT_DISCLAIMER,
           packageSummary,
           priceMist: config.priceMist,
-          sourceSummary: sourceContext ? summarizeSourceContext(sourceContext) : undefined,
+          sourceSummary: resolvedSourceContext ? summarizeSourceContext(resolvedSourceContext) : undefined,
           snapshotHash: await hashSnapshot(snapshot),
           warnings: [],
         });
@@ -438,12 +457,17 @@ export function createTuskscanApiServer(dependencies: ApiDependencies = {}) {
           return;
         }
 
-        const snapshot = await fetchPackage({
-          network: validation.network,
-          packageId: validation.packageId,
-          rpcUrl: getRpcUrl(config),
-        });
-        const sourceContext = await fetchSourceContext(validation.sourceUrl);
+        const sourceContext = await (dependencies.fetchSourceContext ?? fetchSourceContext)(
+          validation.sourceUrl,
+          validation.network,
+        );
+        const snapshot = sourceContext
+          ? await createSourcePackageSnapshot(sourceContext, validation.network, validation.packageId)
+          : await fetchPackage({
+              network: validation.network,
+              packageId: validation.packageId,
+              rpcUrl: getRpcUrl(config),
+            });
         const snapshotHash = await hashSnapshot(snapshot);
 
         const paymentVerifier =
@@ -586,6 +610,40 @@ export function createTuskscanApiServer(dependencies: ApiDependencies = {}) {
   });
 }
 
+function assertRuntimeRequirements(config: RuntimeConfig) {
+  const missing: string[] = [];
+  if (config.network !== "mainnet") {
+    missing.push("SUI_NETWORK=mainnet");
+  }
+  if (!config.databaseUrl) {
+    missing.push("DATABASE_URL");
+  }
+  if (!config.memwalAccountId) {
+    missing.push("MEMWAL_ACCOUNT_ID");
+  }
+  if (!config.memwalPrivateKey) {
+    missing.push("MEMWAL_PRIVATE_KEY");
+  }
+  if (!config.tuskscanPackageId) {
+    missing.push("TUSKSCAN_PACKAGE_ID");
+  }
+  if (!config.tuskscanConfigId) {
+    missing.push("TUSKSCAN_CONFIG_ID");
+  }
+  if (!config.operatorAddress) {
+    missing.push("TUSKSCAN_OPERATOR_ADDRESS");
+  }
+  if (!config.operatorCapId) {
+    missing.push("TUSKSCAN_OPERATOR_CAP_ID");
+  }
+  if (!config.operatorPrivateKey) {
+    missing.push("TUSKSCAN_OPERATOR_PRIVATE_KEY");
+  }
+  if (missing.length > 0) {
+    throw new Error(`Missing required TuskScan runtime config: ${missing.join(", ")}`);
+  }
+}
+
 function createWalrusStore(config: RuntimeConfig): WalrusStore {
   if (isLocalhost(config)) {
     return new InMemoryWalrusStore();
@@ -600,9 +658,6 @@ function createWalrusStore(config: RuntimeConfig): WalrusStore {
 }
 
 function createMemoryStore(config: RuntimeConfig): MemoryStore {
-  if (isLocalhost(config)) {
-    return new InMemoryExploitMemoryStore();
-  }
   if (config.memwalPrivateKey && config.memwalAccountId) {
     return new MemWalMemoryStore({
       accountId: config.memwalAccountId,
@@ -611,7 +666,7 @@ function createMemoryStore(config: RuntimeConfig): MemoryStore {
       serverUrl: config.memwalServerUrl,
     });
   }
-  throw new Error("Production MemWal account/delegate key env vars are required.");
+  throw new Error("MemWal account/delegate key env vars are required.");
 }
 
 function createAuditJobProcessor(options: {
@@ -667,7 +722,7 @@ function createAuditJobStore(config: RuntimeConfig): AuditJobStore {
   if (config.databaseUrl) {
     return new PostgresAuditJobStore(config.databaseUrl);
   }
-  return new InMemoryAuditJobStore();
+  throw new Error("DATABASE_URL is required for the TuskScan audit job store.");
 }
 
 export class InMemoryAuditJobStore implements AuditJobStore {
@@ -1085,7 +1140,10 @@ function canClaimJob(job: LocalAuditJob) {
   return new Date(job.lockExpiresAt).getTime() < Date.now();
 }
 
-async function fetchSourceContext(sourceUrl: string | undefined): Promise<SourceContext | undefined> {
+async function fetchSourceContext(
+  sourceUrl: string | undefined,
+  network: Network = DEFAULT_NETWORK,
+): Promise<SourceContext | undefined> {
   if (!sourceUrl) return undefined;
   const parsed = parseGithubSourceUrl(sourceUrl);
   if (!parsed) {
@@ -1096,6 +1154,13 @@ async function fetchSourceContext(sourceUrl: string | undefined): Promise<Source
   const tree = await fetchGithubTree({ ...parsed, branch });
   const packageRoots = discoverMovePackageRoots(tree.map((item) => item.path));
   const selectedRoot = selectMovePackageRoot(packageRoots, parsed.pathPrefix);
+  const publishedPackageId = await resolvePublishedPackageId({
+    branch,
+    network,
+    parsed,
+    selectedRoot,
+    tree,
+  });
   const movePaths = tree
     .filter(
       (item) =>
@@ -1125,6 +1190,7 @@ async function fetchSourceContext(sourceUrl: string | undefined): Promise<Source
     omittedMoveFileCount: Math.max(0, movePaths.length - limitedFiles.length),
     packageRoots,
     pathPrefix: parsed.pathPrefix,
+    publishedPackageId,
     selectedRoot,
     source: "github" as const,
     totalMoveFileCount: movePaths.length,
@@ -1169,6 +1235,57 @@ function pathIsUnderSelectedScope(
   const scope = selectedRoot ?? pathPrefix;
   if (!scope || scope === ".") return true;
   return path === scope || path.startsWith(`${scope}/`);
+}
+
+async function resolvePublishedPackageId(input: {
+  branch: string;
+  network: Network;
+  parsed: ParsedGithubSourceUrl;
+  selectedRoot: string | undefined;
+  tree: Array<{ path: string; type: string }>;
+}) {
+  const selectedRoot = input.selectedRoot && input.selectedRoot !== "." ? input.selectedRoot : "";
+  const candidates = [
+    selectedRoot ? `${selectedRoot}/Published.toml` : "Published.toml",
+    selectedRoot ? `${selectedRoot}/Move.lock` : "Move.lock",
+  ];
+  const existingPaths = new Set(
+    input.tree.filter((item) => item.type === "blob").map((item) => item.path),
+  );
+
+  for (const path of candidates) {
+    if (!existingPaths.has(path)) continue;
+    const content = await fetchGithubRaw({ ...input.parsed, branch: input.branch, path });
+    const packageId =
+      path.endsWith("Published.toml")
+        ? parsePublishedTomlPackageId(content, input.network)
+        : parseMoveLockPackageId(content, input.network);
+    if (packageId) return packageId;
+  }
+
+  return undefined;
+}
+
+function parsePublishedTomlPackageId(content: string, network: Network) {
+  const section = content.match(
+    new RegExp(`\\[published\\.${escapeRegExp(network)}\\]([\\s\\S]*?)(?:\\n\\[|$)`, "i"),
+  )?.[1];
+  const packageId = section?.match(/published-at\s*=\s*"([^"]+)"/i)?.[1];
+  return packageId && isValidSuiObjectId(packageId) ? packageId : undefined;
+}
+
+function parseMoveLockPackageId(content: string, network: Network) {
+  const section = content.match(
+    new RegExp(`\\[env\\.${escapeRegExp(network)}\\]([\\s\\S]*?)(?:\\n\\[|$)`, "i"),
+  )?.[1];
+  const packageId =
+    section?.match(/published-at\s*=\s*"([^"]+)"/i)?.[1] ??
+    section?.match(/original-id\s*=\s*"([^"]+)"/i)?.[1];
+  return packageId && isValidSuiObjectId(packageId) ? packageId : undefined;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function isGithubUrl(value: string) {
@@ -1267,10 +1384,145 @@ function summarizeSourceContext(sourceContext: SourceContext): SourceSummary {
     omittedMoveFileCount: sourceContext.omittedMoveFileCount,
     packageRoots: sourceContext.packageRoots,
     pathPrefix: sourceContext.pathPrefix,
+    publishedPackageId: sourceContext.publishedPackageId,
     selectedRoot: sourceContext.selectedRoot,
     totalMoveFileCount: sourceContext.totalMoveFileCount,
     url: sourceContext.url,
   };
+}
+
+async function createSourcePackageSnapshot(
+  sourceContext: SourceContext,
+  network: Network,
+  preparedTargetId?: string,
+): Promise<NormalizedPackageSnapshot> {
+  const modules = normalizeSourceModules(sourceContext);
+  const packageId = preparedTargetId?.trim() || sourceTargetId(sourceContext);
+  const unsignedSnapshot = {
+    fetchedAt: sourceContext.fetchedAt,
+    modules,
+    network,
+    packageId,
+    source: "github-move-source" as const,
+  };
+
+  return {
+    ...unsignedSnapshot,
+    packageDigest: await sha256Hex(
+      stableJson({
+        modules,
+        packageId,
+        sourceDigest: sourceContext.digest,
+        sourceUrl: sourceContext.url,
+      }),
+    ),
+  };
+}
+
+function normalizeSourceModules(sourceContext: SourceContext): NormalizedModule[] {
+  const modules = new Map<string, NormalizedModule>();
+
+  for (const file of sourceContext.files) {
+    const moduleName = extractSourceModuleNames(file.content)[0] ?? moduleNameFromPath(file.path);
+    const existing = modules.get(moduleName) ?? {
+      functions: [],
+      name: moduleName,
+      structs: [],
+    };
+    existing.functions.push(...extractMoveFunctions(file).map(normalizeSourceFunction));
+    existing.structs.push(...extractSourceStructs(file.content));
+    modules.set(moduleName, existing);
+  }
+
+  return Array.from(modules.values())
+    .map((module) => ({
+      functions: dedupeByName(module.functions).sort((left, right) =>
+        left.name.localeCompare(right.name),
+      ),
+      name: module.name,
+      structs: dedupeByName(module.structs).sort((left, right) =>
+        left.name.localeCompare(right.name),
+      ),
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function normalizeSourceFunction(fn: {
+  isPublicEntry: boolean;
+  name: string;
+  signature: string;
+}): NormalizedFunction {
+  return {
+    isEntry: /\bentry\b/.test(fn.signature),
+    name: fn.name,
+    parameters: parseSourceParameters(fn.signature),
+    returns: [],
+    visibility: /\bpublic\b/.test(fn.signature) ? "public" : "private",
+  };
+}
+
+function parseSourceParameters(signature: string): NormalizedParameter[] {
+  const parameterBlock = signature.match(/\(([\s\S]*)\)/)?.[1] ?? "";
+  return splitTopLevel(parameterBlock)
+    .map((raw) => raw.trim())
+    .filter(Boolean)
+    .map((raw) => ({
+      isMutableReference: /&\s*mut\b/i.test(raw),
+      isSharedObjectLike: /&\s*mut\b|UID|Receiving|object::|has\s+key/i.test(raw),
+      raw,
+    }));
+}
+
+function extractSourceStructs(content: string): NormalizedStruct[] {
+  return Array.from(
+    content.matchAll(
+      /\bstruct\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:has\s+([^{]+))?\{/g,
+    ),
+  ).map((match) => ({
+    abilities: (match[2] ?? "")
+      .split(",")
+      .map((ability) => ability.trim())
+      .filter(Boolean)
+      .sort(),
+    fields: [],
+    name: match[1] ?? "Struct",
+  }));
+}
+
+function splitTopLevel(value: string) {
+  const parts: string[] = [];
+  let current = "";
+  let depth = 0;
+  for (const char of value) {
+    if (char === "<" || char === "(") depth += 1;
+    if (char === ">" || char === ")") depth = Math.max(0, depth - 1);
+    if (char === "," && depth === 0) {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  if (current.trim()) parts.push(current);
+  return parts;
+}
+
+function dedupeByName<T extends { name: string }>(items: T[]) {
+  return Array.from(new Map(items.map((item) => [item.name, item])).values());
+}
+
+function sourceTargetId(sourceContext: SourceContext) {
+  try {
+    const url = new URL(sourceContext.url);
+    const [owner, repo] = url.pathname.split("/").filter(Boolean);
+    const root = sourceContext.selectedRoot && sourceContext.selectedRoot !== "."
+      ? `/${sourceContext.selectedRoot}`
+      : "";
+    const branch = sourceContext.branch ? `@${sourceContext.branch}` : "";
+    return `github:${owner ?? "repo"}/${repo ?? "source"}${root}${branch}#${sourceContext.digest.slice(2, 14)}`;
+  } catch {
+    return `github:move-source#${sourceContext.digest.slice(2, 14)}`;
+  }
 }
 
 function createPaymentVerifier(config: RuntimeConfig): PaymentVerifier {
@@ -2103,19 +2355,22 @@ function readSession(
 }
 
 function validatePrepareRequest(body: PreparedAuditRequest):
-  | { network: Network; ok: true; packageId: string; sourceUrl?: string }
+  | { network: Network; ok: true; packageId?: string; sourceUrl?: string }
   | { error: string; ok: false } {
-  if (!body.packageId || !isValidSuiObjectId(body.packageId)) {
+  if (body.packageId && !body.sourceUrl && !isValidSuiObjectId(body.packageId)) {
     return { error: "Invalid Sui package ID. Enter a deployed package object ID like 0x....", ok: false };
   }
   if (body.sourceUrl && !isGithubUrl(body.sourceUrl)) {
     return { error: "Source URL must be a public GitHub repository URL.", ok: false };
   }
+  if (!body.packageId && !body.sourceUrl) {
+    return { error: "Paste a GitHub repository URL or a deployed Sui package address.", ok: false };
+  }
 
   return {
     network: body.network ?? DEFAULT_NETWORK,
     ok: true,
-    packageId: body.packageId,
+    packageId: body.packageId?.trim(),
     sourceUrl: body.sourceUrl?.trim() || undefined,
   };
 }
@@ -2133,6 +2388,9 @@ function validateCreateAuditRequest(body: CreateAuditRequest):
   | { error: string; ok: false } {
   const prepared = validatePrepareRequest(body);
   if (!prepared.ok) return prepared;
+  if (!prepared.packageId) {
+    return { error: "Missing prepared audit target for paid audit creation.", ok: false };
+  }
   if (!body.payer || !isValidSuiObjectId(body.payer)) {
     return { error: "Missing or invalid payer wallet address.", ok: false };
   }

@@ -196,7 +196,7 @@ export async function verifyAuditJobPayment(options: {
   const jobObjectId = normalizeSuiObjectId(options.jobObjectId);
   const operatorAddress = normalizeSuiObjectId(options.operatorAddress);
   const payer = normalizeSuiObjectId(options.payer);
-  const packageId = normalizeSuiObjectId(options.packageId);
+  const packageId = options.packageId.trim();
   const rpcUrl = getSuiRpcUrl(options.network, options.rpcUrl);
   const expectedJobType = `${contractPackageId}::audit::AuditJob`;
 

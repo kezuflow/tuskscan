@@ -1,8 +1,8 @@
 # TuskScan
 
-TuskScan is a Sui Overflow Walrus-track project for wallet-native AI pre-audits of deployed Sui Move packages.
+TuskScan is a Sui Overflow Walrus-track project for wallet-native AI pre-audits of Sui Move smart-contract packages.
 
-Users connect a Sui wallet, submit a deployed package ID, pay SUI into an onchain `AuditJob`, and receive a multi-agent pre-audit report. Normalized package snapshots, findings, reports, run logs, and memory diffs are stored as Walrus artifacts. Exploit lessons are written to a MemWal-compatible memory layer so later audits can recall prior patterns.
+Users connect a Sui wallet, paste a GitHub repo/package URL, pay SUI into an onchain `AuditJob`, and receive a multi-agent Move vulnerability report. TuskScan scopes ingestion to Move package roots and `.move` source files, not the whole GitHub codebase. Normalized source snapshots, findings, reports, run logs, and memory diffs are stored as Walrus artifacts. Exploit lessons are written to a MemWal-compatible memory layer so later audits can recall prior patterns.
 
 > TuskScan is AI pre-audit assistance for developer review. It is not a professional security audit and must not be treated as deployment approval.
 
@@ -12,9 +12,10 @@ TuskScan is built as a strong AI pre-audit system, not a replacement for a senio
 
 Today it can:
 
-- Fetch normalized deployed Sui package metadata from Sui RPC.
 - Scope GitHub source ingestion to the selected Move package root instead of loading an entire monorepo.
-- Run deterministic Sui Move vulnerability rules across package metadata and source.
+- Build normalized Move source snapshots from `sources/**/*.move` and `tests/**/*.move`.
+- Optionally enrich source scans with deployed Sui package metadata from Sui RPC when publish metadata is available.
+- Run deterministic Sui Move vulnerability rules across source and optional package metadata.
 - Use LLM researcher, exploit-writer, patch-reviewer, and false-positive critic stages when configured.
 - Recall prior exploit patterns from MemWal and mark matching findings as memory-assisted.
 - Store reusable vulnerability patterns and audit observations back into MemWal.
@@ -91,7 +92,7 @@ For local UI/API development, this repo includes:
 - `apps/api/.env.local`: sets `TUSKSCAN_ENV=localhost` and mainnet Sui RPC.
 - `apps/web/.env.local`: points the web app at `http://localhost:8787`.
 
-Use `TUSKSCAN_ENV=localhost` for local development. For the real hackathon demo, set `TUSKSCAN_ENV=production` and fill in the real Sui/Walrus/MemWal values.
+TuskScan requires Mainnet Sui, the published TuskScan Move package, MemWal credentials, and a Postgres/Supabase database for normal runtime. Local development can still run the API code on your machine, but it does not fall back to fake MemWal or a fake database.
 
 `apps/web/.env.local`:
 
@@ -108,7 +109,7 @@ NEXT_PUBLIC_TUSKSCAN_CONFIG_ID=<shared AuditConfig object id created when move/t
 
 ```env
 PORT=8787
-TUSKSCAN_ENV=production
+TUSKSCAN_ENV=localhost
 SUI_NETWORK=mainnet
 SUI_RPC_URL=https://fullnode.mainnet.sui.io:443
 DATABASE_URL=<Supabase Postgres connection string>
@@ -118,8 +119,6 @@ TUSKSCAN_CONFIG_ID=<shared AuditConfig object id created when move/tuskscan was 
 TUSKSCAN_OPERATOR_ADDRESS=<operator wallet address paid by create_audit_job>
 TUSKSCAN_OPERATOR_CAP_ID=<OperatorCap object id created when move/tuskscan was published>
 TUSKSCAN_OPERATOR_PRIVATE_KEY=<operator Ed25519 private key for finalize_report>
-WALRUS_AGGREGATOR_URL=https://aggregator.walrus-mainnet.walrus.space
-WALRUS_PUBLISHER_URL=<publisher endpoint that supports PUT /v1/blobs>
 MEMWAL_PRIVATE_KEY=<MemWal delegate/private key>
 MEMWAL_ACCOUNT_ID=<MemWal account id>
 MEMWAL_NAMESPACE=tuskscan
@@ -132,7 +131,15 @@ TUSKSCAN_SANDBOX_TIMEOUT_MS=120000
 TUSKSCAN_SUI_BIN=sui
 ```
 
-The API loads `apps/api/.env` and `apps/api/.env.local` automatically when run through `pnpm dev`. `localhost` mode is for opening the app and local package work. `production` mode is the real demo path and requires Walrus, MemWal, payment verification, and operator finalization envs.
+The API loads `apps/api/.env` and `apps/api/.env.local` automatically when run through `pnpm dev`. The API fails on startup if Mainnet Sui, database, MemWal, or TuskScan contract/operator configuration is missing. `TUSKSCAN_ENV=localhost` only keeps Walrus artifacts local in memory so you can run without a Mainnet publisher while testing from your machine.
+
+For full production Walrus storage, add:
+
+```env
+TUSKSCAN_ENV=production
+WALRUS_AGGREGATOR_URL=https://aggregator.walrus-mainnet.walrus.space
+WALRUS_PUBLISHER_URL=<publisher endpoint that supports PUT /v1/blobs>
+```
 
 Walrus Mainnet has a public Mysten aggregator, but no public unauthenticated Mysten publisher. The current API expects a publisher endpoint that supports `PUT /v1/blobs`. If you want to use a Mainnet upload relay instead, add relay or Walrus TypeScript SDK support before setting `TUSKSCAN_ENV=production`.
 
@@ -192,9 +199,11 @@ Record IDs in `docs/demo-packages.md`.
 
 3. Start API and web.
 4. Connect wallet.
-5. Prepare Package A, pay, run audit, and verify artifacts.
-6. Prepare Package B, pay, run audit, and confirm at least one memory-assisted finding.
-7. Prepare Package C, pay, run audit, and confirm predictable randomness/vector-bound findings.
+5. Paste the Package A GitHub URL, pay, run audit, and verify artifacts.
+6. Paste the Package B GitHub URL, pay, run audit, and confirm at least one memory-assisted finding.
+7. Paste the Package C GitHub URL, pay, run audit, and confirm predictable randomness/vector-bound findings.
+
+Committed `Published.toml` or lock metadata is optional enrichment for correlating source to a deployed package. The scanner still runs from the GitHub Move source when publish metadata is absent.
 
 The pitch: Package A teaches the agent an exploit pattern; Package B proves the memory is portable and reusable through the Walrus/MemWal data layer; Package C shows the scanner also catches different source-aware bug classes.
 

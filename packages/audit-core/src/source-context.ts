@@ -9,6 +9,7 @@ export function summarizeSourceContext(sourceContext: SourceContext): SourceSumm
     omittedMoveFileCount: sourceContext.omittedMoveFileCount,
     packageRoots: sourceContext.packageRoots,
     pathPrefix: sourceContext.pathPrefix,
+    publishedPackageId: sourceContext.publishedPackageId,
     selectedRoot: sourceContext.selectedRoot,
     totalMoveFileCount: sourceContext.totalMoveFileCount,
     url: sourceContext.url,

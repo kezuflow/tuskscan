@@ -82,8 +82,10 @@ PACKAGE_C_ID=<paste published package id>
 
 1. Publish `move/tuskscan` and set `NEXT_PUBLIC_TUSKSCAN_PACKAGE_ID` to the published TuskScan package ID.
 2. Publish Package A, Package B, and Package C.
-3. Run TuskScan against Package A.
-4. Run TuskScan against Package B.
+3. Run TuskScan against the Package A GitHub URL.
+4. Run TuskScan against the Package B GitHub URL.
 5. Confirm Package B includes at least one memory-assisted finding.
-6. Run TuskScan against Package C.
+6. Run TuskScan against the Package C GitHub URL.
 7. Confirm Package C shows predictable randomness or unchecked vector access findings.
+
+`Published.toml` is optional enrichment. URL scans still run from scoped Move source when deployed package metadata is absent.

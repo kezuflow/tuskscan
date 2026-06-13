@@ -18,6 +18,11 @@ export {
   extractMemoryWriteBundle,
   extractVulnerabilityPatternMemories,
 } from "./memory.js";
+export {
+  extractMoveFunctions,
+  extractSourceModuleNames,
+  moduleNameFromPath,
+} from "./source-parser.js";
 export { runDeterministicAudit } from "./metadata-rules.js";
 export { calculateRiskScore, createAuditReport } from "./report.js";
 export { runScannerAgent } from "./scanner.js";

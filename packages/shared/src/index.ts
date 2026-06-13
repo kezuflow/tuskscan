@@ -61,7 +61,7 @@ export type NormalizedPackageSnapshot = {
   network: Network;
   packageDigest: string;
   packageId: string;
-  source: "sui-normalized-modules";
+  source: "github-move-source" | "sui-normalized-modules";
 };
 
 export type SourceFile = {
@@ -79,6 +79,7 @@ export type SourceContext = {
   omittedMoveFileCount?: number;
   packageRoots?: string[];
   pathPrefix?: string;
+  publishedPackageId?: string;
   selectedRoot?: string;
   source: "github";
   totalMoveFileCount?: number;
@@ -93,6 +94,7 @@ export type SourceSummary = {
   omittedMoveFileCount?: number;
   packageRoots?: string[];
   pathPrefix?: string;
+  publishedPackageId?: string;
   selectedRoot?: string;
   totalMoveFileCount?: number;
   url: string;

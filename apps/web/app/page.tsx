@@ -38,6 +38,7 @@ type SourceSummary = {
   omittedMoveFileCount?: number;
   packageRoots?: string[];
   pathPrefix?: string;
+  publishedPackageId?: string;
   selectedRoot?: string;
   totalMoveFileCount?: number;
   url: string;
@@ -170,7 +171,7 @@ const contractPackageId = process.env.NEXT_PUBLIC_TUSKSCAN_PACKAGE_ID;
 const configObjectId = process.env.NEXT_PUBLIC_TUSKSCAN_CONFIG_ID;
 const network = process.env.NEXT_PUBLIC_TUSKSCAN_NETWORK === "mainnet" ? "mainnet" : "testnet";
 const samplePackage =
-  "0x0000000000000000000000000000000000000000000000000000000000000002";
+  "https://github.com/kezuflow/tuskscan/tree/main/move/demo-package-a";
 const bannerText = "TUSKSCAN";
 
 export default function Home() {
@@ -244,37 +245,52 @@ export default function Home() {
     const targetPackage = (input?.packageId ?? packageId).trim();
     const targetSource = (input?.sourceUrl ?? sourceUrl).trim();
 
-    if (!targetPackage) {
-      const message = "No Sui package address supplied. Paste a deployed package address before PREPARE.";
+    if (!targetPackage && !targetSource) {
+      const message = "Paste a GitHub repo URL before PREPARE.";
       setError(message);
       appendLogs([{ section: "SCAN", text: message, tone: "error" }]);
       return;
     }
 
     setError("");
-    setPackageId(targetPackage);
+    if (targetPackage) setPackageId(targetPackage);
     setSourceUrl(targetSource);
     setState("preparing");
     appendLogs([
-      { section: "SCAN", text: `Preparing package snapshot: ${shorten(targetPackage)}` },
+      {
+        section: "SCAN",
+        text: targetPackage
+          ? `Preparing audit target: ${shorten(targetPackage)}`
+          : "Building Move source snapshot from GitHub.",
+      },
       {
         section: "SCAN",
         text: targetSource
           ? `Source channel staged: ${targetSource}`
-          : "Source channel empty. Proceeding with onchain package metadata.",
+          : "Source channel empty. Proceeding with onchain package metadata fallback.",
       },
     ]);
 
     try {
       const response = await postJson<PreparedAudit>("/api/audits/prepare", {
         network,
-        packageId: targetPackage,
+        packageId: targetPackage || undefined,
         sourceUrl: targetSource || undefined,
       });
       setPrepared(response);
       setAudit(null);
+      setPackageId(response.packageSummary.packageId);
       setState("prepared");
       appendLogs([
+        ...(targetPackage
+          ? []
+          : [
+              {
+                section: "SCAN" as const,
+                text: `Resolved audit target: ${shorten(response.packageSummary.packageId)}`,
+                tone: "success" as const,
+              },
+            ]),
         {
           section: "SCAN",
           text: `Snapshot ready: ${response.packageSummary.moduleCount} modules / ${response.packageSummary.functionCount} functions.`,
@@ -298,7 +314,7 @@ export default function Home() {
       appendLogs([
         {
           section: "PAYMENT",
-          text: "No prepared package found. Paste a package address or run PREPARE after staging one.",
+          text: "No prepared target found. Paste a GitHub repo URL or run PREPARE after staging one.",
           tone: "warning",
         },
       ]);
@@ -450,11 +466,7 @@ export default function Home() {
     setCommand("");
 
     if (parsed.sourceUrl && !parsed.target) {
-      setSourceUrl(parsed.sourceUrl);
-      appendLogs([
-        { section: "SCAN", text: `Source staged: ${parsed.sourceUrl}`, tone: "success" },
-        { section: "SCAN", text: "Add a deployed Sui package address to bind source to an onchain scan." },
-      ]);
+      void preparePackage({ sourceUrl: parsed.sourceUrl });
       return;
     }
 
@@ -462,7 +474,7 @@ export default function Home() {
       appendLogs([
         {
           section: "SCAN",
-          text: "Unable to parse input. Paste a GitHub repo URL, a Sui package address, or both.",
+          text: "Unable to parse input. Paste a GitHub repo URL.",
           tone: "error",
         },
       ]);
@@ -476,13 +488,13 @@ export default function Home() {
   }
 
   function fillDemo() {
-    setPackageId(samplePackage);
-    setSourceUrl("");
+    setPackageId("");
+    setSourceUrl(samplePackage);
     setCommand(samplePackage);
     appendLogs([
       {
         section: "SYSTEM",
-        text: `Demo package loaded. Submit command or run PREPARE: ${shorten(samplePackage)}`,
+        text: `Demo repo loaded. Submit command or run PREPARE: ${samplePackage}`,
       },
     ]);
   }
@@ -545,7 +557,7 @@ export default function Home() {
               autoComplete="off"
               id="scan-command"
               onChange={(event) => setCommand(event.target.value)}
-              placeholder="github.com/org/repo or Sui package address"
+              placeholder="github.com/org/repo/tree/main/move/package"
               spellCheck={false}
               value={command}
             />
@@ -553,7 +565,7 @@ export default function Home() {
             <button type="submit">EXEC</button>
           </form>
           <p className={styles.hint}>
-            paste a GitHub repo, a Sui package address, or both in one line
+            paste a GitHub repo URL; TuskScan scopes the scan to Move smart-contract packages
           </p>
 
           <div className={styles.actions}>
@@ -880,7 +892,7 @@ const initialLogs: TerminalLog[] = [
   {
     id: 3,
     section: "SCAN",
-    text: "Paste a GitHub repo, a Sui package address, or both to begin.",
+    text: "Paste a GitHub repo URL to begin a Move smart-contract audit.",
   },
 ];
 
@@ -924,7 +936,7 @@ function stateLabel(state: AuditState) {
 function timeline(state: AuditState) {
   const completed = state === "complete" ? 7 : state === "running" ? 5 : state === "prepared" ? 1 : 0;
   return [
-    `Package normalized from Sui ${network}`,
+    `Move package normalized from source on Sui ${network}`,
     "Payment transaction submitted",
     "GitHub Move source fetched when supplied",
     "Exploit memories recalled from MemWal",

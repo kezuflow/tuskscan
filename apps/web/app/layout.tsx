@@ -1,22 +1,14 @@
 import type { Metadata } from "next";
-import { Fira_Code } from "next/font/google";
-import localFont from "next/font/local";
+import { VT323 } from "next/font/google";
 import "@mysten/dapp-kit/dist/index.css";
 import "./globals.css";
 
 import { Providers } from "./providers";
 
-const geistSans = localFont({
-  src: "./fonts/GeistVF.woff",
-  variable: "--font-geist-sans",
-});
-const geistMono = localFont({
-  src: "./fonts/GeistMonoVF.woff",
-  variable: "--font-geist-mono",
-});
-const firaCode = Fira_Code({
+const vt323 = VT323({
+  weight: "400",
   subsets: ["latin"],
-  variable: "--font-fira-code",
+  variable: "--font-vt323",
 });
 
 export const metadata: Metadata = {
@@ -32,7 +24,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} ${firaCode.variable}`}>
+      <body className={vt323.variable}>
         <Providers>{children}</Providers>
       </body>
     </html>

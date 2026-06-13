@@ -1,6 +1,6 @@
 :root {
-  --background: #f7f8f5;
-  --foreground: #17201d;
+  --background: #020500;
+  --foreground: #8dff9a;
 }
 
 html,
@@ -12,6 +12,7 @@ body {
 body {
   color: var(--foreground);
   background: var(--background);
+  font-family: var(--font-fira-code), var(--font-geist-mono), monospace;
 }
 
 * {
@@ -28,4 +29,9 @@ a {
 button,
 input {
   font: inherit;
+}
+
+::selection {
+  background: #8dff9a;
+  color: #020500;
 }

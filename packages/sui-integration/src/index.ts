@@ -299,7 +299,15 @@ export function summarizePackage(
 }
 
 export async function hashSnapshot(snapshot: NormalizedPackageSnapshot) {
-  return sha256Hex(stableJson(snapshot));
+  return sha256Hex(
+    stableJson({
+      modules: snapshot.modules,
+      network: snapshot.network,
+      packageDigest: snapshot.packageDigest,
+      packageId: snapshot.packageId,
+      source: snapshot.source,
+    }),
+  );
 }
 
 export function stableJson(value: unknown): string {

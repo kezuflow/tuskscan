@@ -2,11 +2,19 @@ import type {
   ArtifactPointer,
   AuditObservationMemory,
   AuditReportArtifacts,
+  Network,
   MemoryReference,
   VulnerabilityPatternMemory,
 } from "@repo/shared";
 import { sha256Hex, stableJson } from "@repo/sui-integration";
 import { MemWal } from "@mysten-incubation/memwal";
+import { SuiGrpcClient } from "@mysten/sui/grpc";
+import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+import {
+  RetryableWalrusClientError,
+  WalrusClient,
+  type WalrusClientConfig,
+} from "@mysten/walrus";
 
 export type ArtifactInput = {
   content: string;
@@ -22,6 +30,14 @@ export type WalrusStore = {
 export type WalrusHttpStoreOptions = {
   aggregatorUrl: string;
   publisherUrl: string;
+};
+
+export type WalrusSdkStoreOptions = {
+  deletable?: boolean;
+  epochs?: number;
+  key: string;
+  network: Extract<Network, "mainnet" | "testnet">;
+  rpcUrl: string;
 };
 
 type WalrusStoreResponse = {
@@ -75,6 +91,77 @@ export class HttpWalrusStore implements WalrusStore {
       contentType: input.contentType,
       name: input.name,
     };
+  }
+}
+
+export class SdkWalrusStore implements WalrusStore {
+  private readonly client: WalrusClient;
+  private readonly deletable: boolean;
+  private readonly epochs: number;
+  private readonly signer: Ed25519Keypair;
+
+  constructor(options: WalrusSdkStoreOptions) {
+    const suiClient = new SuiGrpcClient({
+      baseUrl: options.rpcUrl,
+      network: options.network,
+    });
+    this.client = new WalrusClient({
+      network: options.network,
+      storageNodeClientOptions: {
+        timeout: 60_000,
+      },
+      suiClient,
+    } satisfies WalrusClientConfig);
+    this.deletable = options.deletable ?? false;
+    this.epochs = options.epochs ?? 3;
+    this.signer = Ed25519Keypair.fromSecretKey(options.key);
+  }
+
+  async readArtifact(blobId: string) {
+    const bytes = await this.readBlobWithRetry(blobId);
+    return new TextDecoder().decode(bytes);
+  }
+
+  async writeArtifact(input: ArtifactInput): Promise<ArtifactPointer> {
+    const contentHash = await sha256Hex(input.content);
+    const blob = new TextEncoder().encode(input.content);
+    const { blobId } = await this.writeBlobWithRetry(blob);
+    return {
+      blobId,
+      contentHash,
+      contentType: input.contentType,
+      name: input.name,
+    };
+  }
+
+  private async writeBlobWithRetry(blob: Uint8Array) {
+    try {
+      return await this.client.writeBlob({
+        blob,
+        deletable: this.deletable,
+        epochs: this.epochs,
+        signer: this.signer,
+      });
+    } catch (error) {
+      if (!(error instanceof RetryableWalrusClientError)) throw error;
+      this.client.reset();
+      return this.client.writeBlob({
+        blob,
+        deletable: this.deletable,
+        epochs: this.epochs,
+        signer: this.signer,
+      });
+    }
+  }
+
+  private async readBlobWithRetry(blobId: string) {
+    try {
+      return await this.client.readBlob({ blobId });
+    } catch (error) {
+      if (!(error instanceof RetryableWalrusClientError)) throw error;
+      this.client.reset();
+      return this.client.readBlob({ blobId });
+    }
   }
 }
 
@@ -142,17 +229,28 @@ export async function storeAuditArtifacts(options: {
     sourceContext: jsonArtifact("source-context.json", options.contents.sourceContext),
   } satisfies Record<keyof Required<AuditReportArtifacts>, ArtifactInput>;
 
-  const artifactEntries = await Promise.all(
-    Object.entries(inputs).map(async ([name, input]) => {
-      const pointer = await options.store.writeArtifact(input);
-      const verification = await verifyArtifact({
-        blobId: pointer.blobId,
-        expectedHash: pointer.contentHash,
-        store: options.store,
-      });
-      return [name, pointer, { expectedHash: pointer.contentHash, ...verification }] as const;
-    }),
-  );
+  const artifactEntries: Array<
+    readonly [
+      keyof Required<AuditReportArtifacts>,
+      ArtifactPointer,
+      ArtifactVerification & { expectedHash: string },
+    ]
+  > = [];
+  for (const [name, input] of Object.entries(inputs) as Array<
+    [keyof Required<AuditReportArtifacts>, ArtifactInput]
+  >) {
+    const pointer = await options.store.writeArtifact(input);
+    const verification = await verifyArtifact({
+      blobId: pointer.blobId,
+      expectedHash: pointer.contentHash,
+      store: options.store,
+    });
+    artifactEntries.push([
+      name,
+      pointer,
+      { expectedHash: pointer.contentHash, ...verification },
+    ] as const);
+  }
 
   return {
     artifacts: Object.fromEntries(

@@ -80,6 +80,7 @@ export type SourceContext = {
   packageRoots?: string[];
   pathPrefix?: string;
   publishedPackageId?: string;
+  resolvedRef?: string;
   selectedRoot?: string;
   source: "github";
   totalMoveFileCount?: number;
@@ -95,6 +96,7 @@ export type SourceSummary = {
   packageRoots?: string[];
   pathPrefix?: string;
   publishedPackageId?: string;
+  resolvedRef?: string;
   selectedRoot?: string;
   totalMoveFileCount?: number;
   url: string;

@@ -58,6 +58,13 @@ test("stable JSON and snapshot hash are deterministic", async () => {
 
   assert.equal(stableJson(left), stableJson(right));
   assert.equal(await hashSnapshot(fixtureSnapshot), await hashSnapshot(fixtureSnapshot));
+  assert.equal(
+    await hashSnapshot({
+      ...fixtureSnapshot,
+      fetchedAt: "2026-06-13T00:00:00.000Z",
+    }),
+    await hashSnapshot(fixtureSnapshot),
+  );
 });
 
 test("summarizes normalized package fixtures", () => {

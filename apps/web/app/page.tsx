@@ -351,6 +351,7 @@ export default function Home() {
     }
 
     try {
+      const paidSourceUrl = (prepared.sourceSummary?.url ?? sourceUrl.trim()) || undefined;
       const payment = await createAuditJobPayment({
         packageId: prepared.packageSummary.packageId,
         priceMist: prepared.priceMist,
@@ -364,12 +365,13 @@ export default function Home() {
           tone: "success",
         },
         { section: "SCAN", text: "Audit workers online. Recalling exploit memories." },
+        { section: "SCAN", text: "Registering paid audit with TuskScan API." },
       ]);
       const created = await postJson<{ auditId: string; status: string }>("/api/audits", {
         network,
         packageId: prepared.packageSummary.packageId,
         payer: account.address,
-        sourceUrl: sourceUrl.trim() || undefined,
+        sourceUrl: paidSourceUrl,
         suiJobObjectId: payment.jobObjectId,
         suiTransactionDigest: payment.digest,
       });
@@ -1027,13 +1029,20 @@ function isZeroAddress(value: string) {
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`${apiBase}${path}`, {
-    body: JSON.stringify(body),
-    headers: { "content-type": "application/json" },
-    method: "POST",
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${apiBase}${path}`, {
+      body: JSON.stringify(body),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+  } catch (error) {
+    throw new Error(
+      `API request failed for ${path}: ${errorMessage(error)} Check that TuskScan API is running at ${apiBase}.`,
+    );
+  }
   if (!response.ok) {
-    throw new Error((await response.json()).error ?? `HTTP ${response.status}`);
+    throw new Error(`API ${path} returned HTTP ${response.status}: ${await readErrorBody(response)}`);
   }
   return response.json() as Promise<T>;
 }
@@ -1041,7 +1050,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(`${apiBase}${path}`);
   if (!response.ok) {
-    throw new Error((await response.json()).error ?? `HTTP ${response.status}`);
+    throw new Error(`API ${path} returned HTTP ${response.status}: ${await readErrorBody(response)}`);
   }
   return response.json() as Promise<T>;
 }
@@ -1051,9 +1060,18 @@ async function getJsonWithAuth<T>(path: string, token: string): Promise<T> {
     headers: { authorization: `Bearer ${token}` },
   });
   if (!response.ok) {
-    throw new Error((await response.json()).error ?? `HTTP ${response.status}`);
+    throw new Error(`API ${path} returned HTTP ${response.status}: ${await readErrorBody(response)}`);
   }
   return response.json() as Promise<T>;
+}
+
+async function readErrorBody(response: Response) {
+  try {
+    const payload = (await response.json()) as { error?: unknown };
+    return typeof payload.error === "string" ? payload.error : JSON.stringify(payload);
+  } catch {
+    return response.statusText || "request failed";
+  }
 }
 
 function sleep(ms: number) {

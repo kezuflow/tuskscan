@@ -85,16 +85,16 @@ Fund the active address with real mainnet SUI before publishing or running paid 
 
 ## Environment
 
-Local env files are app-specific.
+Environment files are app-specific.
 
-For local UI/API development, this repo includes:
+For local UI/API development, create:
 
-- `apps/api/.env.local`: sets `TUSKSCAN_ENV=localhost` and mainnet Sui RPC.
-- `apps/web/.env.local`: points the web app at `http://localhost:8787`.
+- `apps/api/.env`: server-only runtime secrets and mainnet service config.
+- `apps/web/.env`: public browser config that points the web app at `http://localhost:8787`.
 
-TuskScan requires Mainnet Sui, the published TuskScan Move package, MemWal credentials, and a Postgres/Supabase database for normal runtime. Local development can still run the API code on your machine, but it does not fall back to fake MemWal or a fake database.
+TuskScan requires Mainnet Sui, the published TuskScan Move package, MemWal credentials, Walrus storage, and a Postgres/Supabase database for normal runtime. Local development can still run the API code on your machine, but it does not fall back to fake MemWal, fake Walrus storage, or a fake database.
 
-`apps/web/.env.local`:
+`apps/web/.env`:
 
 ```env
 NEXT_PUBLIC_TUSKSCAN_API_URL=http://localhost:8787
@@ -105,11 +105,11 @@ NEXT_PUBLIC_TUSKSCAN_CONFIG_ID=<shared AuditConfig object id created when move/t
 
 `NEXT_PUBLIC_TUSKSCAN_PACKAGE_ID` and `NEXT_PUBLIC_TUSKSCAN_CONFIG_ID` are required for the real wallet PTB. The web app no longer falls back to a mock payment digest.
 
-`apps/api/.env.local` or deployment environment:
+`apps/api/.env` or deployment environment:
 
 ```env
 PORT=8787
-TUSKSCAN_ENV=localhost
+TUSKSCAN_ENV=production
 SUI_NETWORK=mainnet
 SUI_RPC_URL=https://fullnode.mainnet.sui.io:443
 DATABASE_URL=<Supabase Postgres connection string>
@@ -119,6 +119,8 @@ TUSKSCAN_CONFIG_ID=<shared AuditConfig object id created when move/tuskscan was 
 TUSKSCAN_OPERATOR_ADDRESS=<operator wallet address paid by create_audit_job>
 TUSKSCAN_OPERATOR_CAP_ID=<OperatorCap object id created when move/tuskscan was published>
 TUSKSCAN_OPERATOR_PRIVATE_KEY=<operator Ed25519 private key for finalize_report>
+WALRUS_AGGREGATOR_URL=https://aggregator.walrus-mainnet.walrus.space
+WALRUS_STORAGE_EPOCHS=3
 MEMWAL_PRIVATE_KEY=<MemWal delegate/private key>
 MEMWAL_ACCOUNT_ID=<MemWal account id>
 MEMWAL_NAMESPACE=tuskscan
@@ -131,17 +133,17 @@ TUSKSCAN_SANDBOX_TIMEOUT_MS=120000
 TUSKSCAN_SUI_BIN=sui
 ```
 
-The API loads `apps/api/.env` and `apps/api/.env.local` automatically when run through `pnpm dev`. The API fails on startup if Mainnet Sui, database, MemWal, or TuskScan contract/operator configuration is missing. `TUSKSCAN_ENV=localhost` only keeps Walrus artifacts local in memory so you can run without a Mainnet publisher while testing from your machine.
+The API loads `apps/api/.env` automatically when run through `pnpm dev`. It no longer loads `.env.local`. The API fails on startup if Mainnet Sui, database, MemWal, Walrus SDK storage, or TuskScan contract/operator configuration is missing.
 
-For full production Walrus storage, add:
+For real Walrus storage, use:
 
 ```env
 TUSKSCAN_ENV=production
 WALRUS_AGGREGATOR_URL=https://aggregator.walrus-mainnet.walrus.space
-WALRUS_PUBLISHER_URL=<publisher endpoint that supports PUT /v1/blobs>
+WALRUS_STORAGE_EPOCHS=3
 ```
 
-Walrus Mainnet has a public Mysten aggregator, but no public unauthenticated Mysten publisher. The current API expects a publisher endpoint that supports `PUT /v1/blobs`. If you want to use a Mainnet upload relay instead, add relay or Walrus TypeScript SDK support before setting `TUSKSCAN_ENV=production`.
+Walrus Mainnet has a public Mysten aggregator, but no public unauthenticated Mysten publisher. TuskScan writes artifacts directly through the Walrus TypeScript SDK with `TUSKSCAN_OPERATOR_PRIVATE_KEY`; `WALRUS_PUBLISHER_URL` is only needed if you later choose to run a private authenticated HTTP publisher.
 
 Supabase is used as the app index so a wallet can see prior audits after the API restarts. Get `DATABASE_URL` from Supabase dashboard: Project Settings -> Database -> Connection string -> URI. Use the server-side Postgres connection string, not the browser anon key. The API auto-creates the `audit_jobs` table on first use; the same schema is available at `supabase/schema.sql` if you prefer running it manually in Supabase SQL Editor.
 

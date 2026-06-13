@@ -14,7 +14,7 @@ export default defineConfig({
 
 function loadLocalEnvFiles() {
   const protectedKeys = new Set(Object.keys(process.env));
-  for (const file of [".env", ".env.local"]) {
+  for (const file of [".env"]) {
     const path = resolve(process.cwd(), file);
     if (!existsSync(path)) continue;
     for (const [key, value] of Object.entries(parseEnvFile(readFileSync(path, "utf8")))) {

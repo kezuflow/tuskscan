@@ -47,6 +47,7 @@ import {
   HttpWalrusStore,
   InMemoryWalrusStore,
   MemWalMemoryStore,
+  SdkWalrusStore,
   recallExploitMemories,
   storeAuditArtifacts,
   verifyArtifact,
@@ -89,6 +90,7 @@ type RuntimeConfig = {
   tuskscanPackageId?: string;
   walrusAggregatorUrl?: string;
   walrusPublisherUrl?: string;
+  walrusStorageEpochs: number;
 };
 
 type ApiDependencies = {
@@ -219,6 +221,7 @@ export function loadRuntimeConfig(env = process.env): RuntimeConfig {
     tuskscanPackageId: env.TUSKSCAN_PACKAGE_ID,
     walrusAggregatorUrl: env.WALRUS_AGGREGATOR_URL,
     walrusPublisherUrl: env.WALRUS_PUBLISHER_URL,
+    walrusStorageEpochs: parsePositiveInteger(env.WALRUS_STORAGE_EPOCHS, 3),
   };
 }
 
@@ -248,7 +251,7 @@ function parsePriceMist(value: string | undefined) {
 
 function loadLocalEnvFiles() {
   const protectedKeys = new Set(Object.keys(process.env));
-  for (const file of [".env", ".env.local"]) {
+  for (const file of [".env"]) {
     const path = resolve(process.cwd(), file);
     if (!existsSync(path)) continue;
     for (const [key, value] of Object.entries(
@@ -307,9 +310,12 @@ export function validateRuntimeConfig(config: RuntimeConfig) {
       : "missing",
     suiRpc: getRpcUrl(config),
     walrus: isLocalhost(config)
-        ? "localhost"
-        : config.walrusAggregatorUrl && config.walrusPublisherUrl
-          ? "production"
+      ? "localhost"
+      : config.operatorPrivateKey
+        ? "sdk"
+        : isConfiguredHttpUrl(config.walrusAggregatorUrl) &&
+            isConfiguredHttpUrl(config.walrusPublisherUrl)
+          ? "http"
           : "missing",
   };
 }
@@ -648,13 +654,29 @@ function createWalrusStore(config: RuntimeConfig): WalrusStore {
   if (isLocalhost(config)) {
     return new InMemoryWalrusStore();
   }
-  if (config.walrusAggregatorUrl && config.walrusPublisherUrl) {
-    return new HttpWalrusStore({
-      aggregatorUrl: config.walrusAggregatorUrl,
-      publisherUrl: config.walrusPublisherUrl,
+  if (config.operatorPrivateKey) {
+    return new SdkWalrusStore({
+      epochs: config.walrusStorageEpochs,
+      key: config.operatorPrivateKey,
+      network: config.network,
+      rpcUrl: getRpcUrl(config),
     });
   }
-  throw new Error("Production Walrus publisher/aggregator env vars are required.");
+  const aggregatorUrl = isConfiguredHttpUrl(config.walrusAggregatorUrl)
+    ? config.walrusAggregatorUrl
+    : undefined;
+  const publisherUrl = isConfiguredHttpUrl(config.walrusPublisherUrl)
+    ? config.walrusPublisherUrl
+    : undefined;
+  if (aggregatorUrl && publisherUrl) {
+    return new HttpWalrusStore({
+      aggregatorUrl,
+      publisherUrl,
+    });
+  }
+  throw new Error(
+    "Production Walrus storage requires TUSKSCAN_OPERATOR_PRIVATE_KEY for SDK writes, or WALRUS_AGGREGATOR_URL and WALRUS_PUBLISHER_URL for HTTP publisher writes.",
+  );
 }
 
 function createMemoryStore(config: RuntimeConfig): MemoryStore {
@@ -667,6 +689,16 @@ function createMemoryStore(config: RuntimeConfig): MemoryStore {
     });
   }
   throw new Error("MemWal account/delegate key env vars are required.");
+}
+
+function isConfiguredHttpUrl(value: string | undefined) {
+  if (!value || value.includes("<") || value.includes(">")) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function createAuditJobProcessor(options: {
@@ -1151,11 +1183,12 @@ async function fetchSourceContext(
   }
 
   const branch = parsed.branch ?? (await fetchGithubDefaultBranch(parsed));
-  const tree = await fetchGithubTree({ ...parsed, branch });
+  const resolvedRef = await fetchGithubCommitSha({ ...parsed, branch });
+  const tree = await fetchGithubTree({ ...parsed, branch: resolvedRef });
   const packageRoots = discoverMovePackageRoots(tree.map((item) => item.path));
   const selectedRoot = selectMovePackageRoot(packageRoots, parsed.pathPrefix);
   const publishedPackageId = await resolvePublishedPackageId({
-    branch,
+    branch: resolvedRef,
     network,
     parsed,
     selectedRoot,
@@ -1174,7 +1207,7 @@ async function fetchSourceContext(
   const files = (
     await Promise.all(
       movePaths.slice(0, 80).map(async (path) => {
-        const content = await fetchGithubRaw({ ...parsed, branch, path });
+        const content = await fetchGithubRaw({ ...parsed, branch: resolvedRef, path });
         if (content.length > 250_000) return undefined;
         return { content, path, sizeBytes: Buffer.byteLength(content, "utf8") };
       }),
@@ -1191,15 +1224,16 @@ async function fetchSourceContext(
     packageRoots,
     pathPrefix: parsed.pathPrefix,
     publishedPackageId,
+    resolvedRef,
     selectedRoot,
     source: "github" as const,
     totalMoveFileCount: movePaths.length,
-    url: sourceUrl,
+    url: githubTreeUrl(parsed, resolvedRef),
   };
 
   return {
     ...unsignedContext,
-    digest: await sha256Hex(stableJson(unsignedContext)),
+    digest: await sha256Hex(stableJson(stableSourceContextDigestInput(unsignedContext))),
   };
 }
 
@@ -1325,6 +1359,13 @@ async function fetchGithubDefaultBranch(input: ParsedGithubSourceUrl) {
   return payload.default_branch ?? "main";
 }
 
+async function fetchGithubCommitSha(input: ParsedGithubSourceUrl & { branch: string }) {
+  const payload = await githubJson<{ sha?: string }>(
+    `https://api.github.com/repos/${input.owner}/${input.repo}/commits/${encodeURIComponent(input.branch)}`,
+  );
+  return payload.sha ?? input.branch;
+}
+
 async function fetchGithubTree(input: ParsedGithubSourceUrl & { branch: string }) {
   const payload = await githubJson<{
     tree?: Array<{ path: string; type: string }>;
@@ -1364,6 +1405,29 @@ function githubHeaders() {
   };
 }
 
+function githubTreeUrl(input: ParsedGithubSourceUrl, ref: string) {
+  const path = input.pathPrefix ? `/${input.pathPrefix}` : "";
+  return `https://github.com/${input.owner}/${input.repo}/tree/${ref}${path}`;
+}
+
+function stableSourceContextDigestInput(
+  sourceContext: Omit<SourceContext, "digest">,
+) {
+  return {
+    files: sourceContext.files,
+    moveFileCount: sourceContext.moveFileCount,
+    omittedMoveFileCount: sourceContext.omittedMoveFileCount,
+    packageRoots: sourceContext.packageRoots,
+    pathPrefix: sourceContext.pathPrefix,
+    publishedPackageId: sourceContext.publishedPackageId,
+    resolvedRef: sourceContext.resolvedRef,
+    selectedRoot: sourceContext.selectedRoot,
+    source: sourceContext.source,
+    totalMoveFileCount: sourceContext.totalMoveFileCount,
+    url: sourceContext.url,
+  };
+}
+
 function limitSourceBytes(files: SourceContext["files"], maxBytes: number) {
   const selected: SourceContext["files"] = [];
   let total = 0;
@@ -1385,6 +1449,7 @@ function summarizeSourceContext(sourceContext: SourceContext): SourceSummary {
     packageRoots: sourceContext.packageRoots,
     pathPrefix: sourceContext.pathPrefix,
     publishedPackageId: sourceContext.publishedPackageId,
+    resolvedRef: sourceContext.resolvedRef,
     selectedRoot: sourceContext.selectedRoot,
     totalMoveFileCount: sourceContext.totalMoveFileCount,
     url: sourceContext.url,
@@ -1518,7 +1583,11 @@ function sourceTargetId(sourceContext: SourceContext) {
     const root = sourceContext.selectedRoot && sourceContext.selectedRoot !== "."
       ? `/${sourceContext.selectedRoot}`
       : "";
-    const branch = sourceContext.branch ? `@${sourceContext.branch}` : "";
+    const branch = sourceContext.resolvedRef
+      ? `@${sourceContext.resolvedRef.slice(0, 12)}`
+      : sourceContext.branch
+        ? `@${sourceContext.branch}`
+        : "";
     return `github:${owner ?? "repo"}/${repo ?? "source"}${root}${branch}#${sourceContext.digest.slice(2, 14)}`;
   } catch {
     return `github:move-source#${sourceContext.digest.slice(2, 14)}`;

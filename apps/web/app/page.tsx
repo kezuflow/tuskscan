@@ -171,11 +171,7 @@ const configObjectId = process.env.NEXT_PUBLIC_TUSKSCAN_CONFIG_ID;
 const network = process.env.NEXT_PUBLIC_TUSKSCAN_NETWORK === "mainnet" ? "mainnet" : "testnet";
 const samplePackage =
   "0x0000000000000000000000000000000000000000000000000000000000000002";
-const asciiBanner = String.raw`_____ _   _ ____  _  __ ____   ____    _    _   _
-|_   _| | | / ___|| |/ // ___| / ___|  / \  | \ | |
-  | | | | | \___ \| ' / \___ \| |     / _ \ |  \| |
-  | | | |_| |___) | . \  ___) | |___ / ___ \| |\  |
-  |_|  \___/|____/|_|\_\|____/ \____/_/   \_\_| \_|`;
+const bannerText = "TUSKSCAN";
 
 export default function Home() {
   const account = useCurrentAccount();
@@ -185,7 +181,7 @@ export default function Home() {
   const [audit, setAudit] = useState<AuditJob | null>(null);
   const [command, setCommand] = useState("");
   const [error, setError] = useState("");
-  const [packageId, setPackageId] = useState(samplePackage);
+  const [packageId, setPackageId] = useState("");
   const [prepared, setPrepared] = useState<PreparedAudit | null>(null);
   const [privateReport, setPrivateReport] = useState(false);
   const [sourceUrl, setSourceUrl] = useState("");
@@ -249,7 +245,7 @@ export default function Home() {
     const targetSource = (input?.sourceUrl ?? sourceUrl).trim();
 
     if (!targetPackage) {
-      const message = "No Sui package target supplied. Use --target=0x...";
+      const message = "No Sui package address supplied. Paste a deployed package address before PREPARE.";
       setError(message);
       appendLogs([{ section: "SCAN", text: message, tone: "error" }]);
       return;
@@ -302,7 +298,7 @@ export default function Home() {
       appendLogs([
         {
           section: "PAYMENT",
-          text: "No prepared package found. Run PREPARE or submit --target=0x... first.",
+          text: "No prepared package found. Paste a package address or run PREPARE after staging one.",
           tone: "warning",
         },
       ]);
@@ -457,7 +453,7 @@ export default function Home() {
       setSourceUrl(parsed.sourceUrl);
       appendLogs([
         { section: "SCAN", text: `Source staged: ${parsed.sourceUrl}`, tone: "success" },
-        { section: "SCAN", text: "Awaiting package target. Submit --target=0x..." },
+        { section: "SCAN", text: "Add a deployed Sui package address to bind source to an onchain scan." },
       ]);
       return;
     }
@@ -466,7 +462,7 @@ export default function Home() {
       appendLogs([
         {
           section: "SCAN",
-          text: "Unable to parse target. Try --target=0x... or --source=https://github.com/org/repo",
+          text: "Unable to parse input. Paste a GitHub repo URL, a Sui package address, or both.",
           tone: "error",
         },
       ]);
@@ -482,11 +478,11 @@ export default function Home() {
   function fillDemo() {
     setPackageId(samplePackage);
     setSourceUrl("");
-    setCommand(`--target=${samplePackage}`);
+    setCommand(samplePackage);
     appendLogs([
       {
         section: "SYSTEM",
-        text: `Demo target loaded. Submit command or run PREPARE: ${shorten(samplePackage)}`,
+        text: `Demo package loaded. Submit command or run PREPARE: ${shorten(samplePackage)}`,
       },
     ]);
   }
@@ -500,30 +496,36 @@ export default function Home() {
           <span className={styles.topStatus}>SYSTEM STATUS: {stateLabel(state).toUpperCase()}</span>
         </div>
         <div className={styles.walletBox}>
-          <span>WALLET: {walletLabel}</span>
           <ConnectButton connectText="CONNECT_WALLET" />
         </div>
       </header>
 
       <section className={styles.terminal}>
         <section className={styles.bootPanel} aria-label="TuskScan terminal">
-          <pre className={styles.banner}>{asciiBanner}</pre>
-          <div className={styles.rule}>
-            ===================================================================
-          </div>
-          <div className={styles.systemGrid}>
-            <span>[=] TUSKSCAN // AI VULNERABILITY CORE</span>
-            <span>[=] SYSTEM STATUS: {stateLabel(state).toUpperCase()}</span>
-            <span>HOST: CORE_MAIN_FRAME</span>
-            <span>NETWORK: SUI_{network.toUpperCase()}</span>
-            <span>WALLET: {walletLabel}</span>
-            <span>MODE: CRT_INTERACTIVE_SCAN</span>
-          </div>
-          <div className={styles.rule}>
-            ===================================================================
+          <div className={styles.arcadeMasthead}>
+            <div className={styles.brandPlate}>
+              <h1 className={styles.banner}>{bannerText}</h1>
+            </div>
           </div>
 
-          <div className={styles.logStream} aria-live="polite">
+          <div className={styles.cockpitGrid}>
+            <section className={styles.miniPanel}>
+              <h2>SYSTEM STATUS</h2>
+              <p>- SYSTEM: {stateLabel(state).toUpperCase()}</p>
+              <p>- ENGINE: READY</p>
+              <p>- MODE  : SCAN</p>
+            </section>
+            <section className={styles.miniPanel}>
+              <h2>WALLET</h2>
+              <p>- STATUS: {account ? "CONNECTED" : "DISCONNECTED"}</p>
+              <p>- ADDR  : {walletLabel}</p>
+              <p>- NET   : SUI_{network.toUpperCase()}</p>
+            </section>
+          </div>
+
+          <div className={styles.consolePanel}>
+            <h2>CONSOLE OUTPUT</h2>
+            <div className={styles.logStream} aria-live="polite">
             {terminalLogs.map((line) => (
               <p className={toneClass(line.tone, styles)} key={line.id}>
                 <span>[{line.section}]</span> &gt; {line.text}
@@ -534,6 +536,7 @@ export default function Home() {
                 <span>[ERROR]</span> &gt; {error}
               </p>
             ) : null}
+            </div>
           </div>
 
           <form className={styles.promptForm} onSubmit={handleCommandSubmit}>
@@ -542,16 +545,15 @@ export default function Home() {
               autoComplete="off"
               id="scan-command"
               onChange={(event) => setCommand(event.target.value)}
-              placeholder="--target=0x..."
+              placeholder="github.com/org/repo or Sui package address"
               spellCheck={false}
               value={command}
             />
+            <span aria-hidden="true" className={styles.cursor} />
             <button type="submit">EXEC</button>
           </form>
           <p className={styles.hint}>
-            accepts Sui package ID, GitHub source URL, or both:
-            {" "}
-            --target=0x... --source=https://github.com/org/repo
+            paste a GitHub repo, a Sui package address, or both in one line
           </p>
 
           <div className={styles.actions}>
@@ -586,62 +588,66 @@ export default function Home() {
           </div>
         </section>
 
-        <section className={styles.statusPanel}>
-          <div className={styles.metricLine}>
-            <span>MODULES</span>
-            <strong>{prepared?.packageSummary.moduleCount ?? "--"}</strong>
-          </div>
-          <div className={styles.metricLine}>
-            <span>FUNCTIONS</span>
-            <strong>{prepared?.packageSummary.functionCount ?? "--"}</strong>
-          </div>
-          <div className={styles.metricLine}>
-            <span>SOURCE_FILES</span>
-            <strong>
-              {prepared?.sourceSummary?.moveFileCount ??
-                audit?.report?.sourceSummary?.moveFileCount ??
-                "--"}
-            </strong>
-          </div>
-          <div className={styles.metricLine}>
-            <span>RISK</span>
-            <strong>{audit ? `${riskScore}/100` : "--"}</strong>
-          </div>
-        </section>
-
-        <section className={styles.panelGrid}>
-          <section className={styles.terminalPanel}>
-            <h2>[ SCAN_TIMELINE ]</h2>
-            <ol className={styles.timeline}>
-              {timeline(state).map((item) => (
-                <li className={item.done ? styles.done : ""} key={item.label}>
-                  <span>{String(item.step).padStart(2, "0")}</span>
-                  {item.label}
-                </li>
-              ))}
-            </ol>
-          </section>
-
-          <section className={styles.terminalPanel}>
-            <h2>[ WALRUS_SUI_PROOF ]</h2>
-            <dl className={styles.proofList}>
-              <div>
-                <dt>SUI_REPORT_JOB</dt>
-                <dd>{audit?.suiJobObjectId ?? `pending ${network} payment`}</dd>
+        {prepared || audit ? (
+          <>
+            <section className={styles.statusPanel}>
+              <div className={styles.metricLine}>
+                <span>MODULES</span>
+                <strong>{prepared?.packageSummary.moduleCount ?? "--"}</strong>
               </div>
-              <div>
-                <dt>TRANSACTION</dt>
-                <dd>{audit?.suiTransactionDigest ?? "pending"}</dd>
+              <div className={styles.metricLine}>
+                <span>FUNCTIONS</span>
+                <strong>{prepared?.packageSummary.functionCount ?? "--"}</strong>
               </div>
-              {proofRows.slice(0, 4).map((row) => (
-                <div key={row.name}>
-                  <dt>{row.name.toUpperCase()}</dt>
-                  <dd>{row.uri}</dd>
-                </div>
-              ))}
-            </dl>
-          </section>
-        </section>
+              <div className={styles.metricLine}>
+                <span>SOURCE_FILES</span>
+                <strong>
+                  {prepared?.sourceSummary?.moveFileCount ??
+                    audit?.report?.sourceSummary?.moveFileCount ??
+                    "--"}
+                </strong>
+              </div>
+              <div className={styles.metricLine}>
+                <span>RISK</span>
+                <strong>{audit ? `${riskScore}/100` : "--"}</strong>
+              </div>
+            </section>
+
+            <section className={styles.panelGrid}>
+              <section className={styles.terminalPanel}>
+                <h2>[ SCAN_TIMELINE ]</h2>
+                <ol className={styles.timeline}>
+                  {timeline(state).map((item) => (
+                    <li className={item.done ? styles.done : ""} key={item.label}>
+                      <span>{String(item.step).padStart(2, "0")}</span>
+                      {item.label}
+                    </li>
+                  ))}
+                </ol>
+              </section>
+
+              <section className={styles.terminalPanel}>
+                <h2>[ WALRUS_SUI_PROOF ]</h2>
+                <dl className={styles.proofList}>
+                  <div>
+                    <dt>SUI_REPORT_JOB</dt>
+                    <dd>{audit?.suiJobObjectId ?? `pending ${network} payment`}</dd>
+                  </div>
+                  <div>
+                    <dt>TRANSACTION</dt>
+                    <dd>{audit?.suiTransactionDigest ?? "pending"}</dd>
+                  </div>
+                  {proofRows.slice(0, 4).map((row) => (
+                    <div key={row.name}>
+                      <dt>{row.name.toUpperCase()}</dt>
+                      <dd>{row.uri}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            </section>
+          </>
+        ) : null}
 
         {walletAudits.length ? (
           <section className={styles.terminalPanel}>
@@ -663,6 +669,7 @@ export default function Home() {
           </section>
         ) : null}
 
+        {audit ? (
         <section className={styles.terminalPanel}>
           <div className={styles.panelHeader}>
             <h2>[ REPORT_OUTPUT ]</h2>
@@ -783,6 +790,7 @@ export default function Home() {
             ))}
           </div>
         </section>
+        ) : null}
       </section>
     </main>
   );
@@ -872,7 +880,7 @@ const initialLogs: TerminalLog[] = [
   {
     id: 3,
     section: "SCAN",
-    text: "Input target with --target=0x... or stage source with --source=https://github.com/org/repo",
+    text: "Paste a GitHub repo, a Sui package address, or both to begin.",
   },
 ];
 
@@ -893,10 +901,12 @@ function parseCommand(input: string): ParsedCommand {
   const targetMatch = trimmed.match(/--target=(\S+)/i);
   const sourceMatch = trimmed.match(/--source=(\S+)/i);
   const urlMatch = trimmed.match(/https?:\/\/\S+/i);
+  const githubMatch = trimmed.match(/(?:https?:\/\/)?github\.com\/[^\s]+/i);
   const packageMatch = trimmed.match(/0x[a-f0-9]{16,}/i);
+  const sourceUrl = sourceMatch?.[1] ?? urlMatch?.[0] ?? githubMatch?.[0];
 
   return {
-    sourceUrl: sourceMatch?.[1] ?? urlMatch?.[0],
+    sourceUrl: sourceUrl?.startsWith("github.com") ? `https://${sourceUrl}` : sourceUrl,
     target: targetMatch?.[1] ?? packageMatch?.[0],
   };
 }

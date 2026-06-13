@@ -1,14 +1,21 @@
 .shell {
   position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100svh;
   min-height: 100svh;
   overflow: hidden;
   background:
-    radial-gradient(circle at 50% 28%, rgba(35, 255, 130, 0.09), transparent 34%),
-    radial-gradient(circle at 8% 90%, rgba(0, 215, 255, 0.06), transparent 28%),
-    #020500;
+    radial-gradient(ellipse at center, rgba(57, 255, 20, 0.1), transparent 72%),
+    linear-gradient(180deg, rgba(5, 24, 4, 0.98), #020900 46%, #010601 100%);
   color: #8dff9a;
-  font-family: var(--font-fira-code), var(--font-geist-mono), monospace;
-  text-shadow: 0 0 5px rgba(115, 255, 134, 0.74);
+  font-family: var(--font-vt323), monospace;
+  font-size: 24px;
+  letter-spacing: 0;
+  text-shadow:
+    0 0 1px #39ff14,
+    0 0 6px rgba(57, 255, 20, 0.58),
+    0 0 14px rgba(57, 255, 20, 0.24);
 }
 
 .shell::before {
@@ -18,9 +25,21 @@
   pointer-events: none;
   content: "";
   background:
-    linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.26) 50%),
-    linear-gradient(90deg, rgba(255, 0, 0, 0.04), rgba(0, 255, 65, 0.02), rgba(0, 0, 255, 0.04));
-  background-size: 100% 4px, 6px 100%;
+    repeating-linear-gradient(
+      0deg,
+      rgba(57, 255, 20, 0.08) 0,
+      rgba(57, 255, 20, 0.08) 1px,
+      rgba(0, 0, 0, 0.16) 2px,
+      rgba(0, 0, 0, 0.16) 4px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(57, 255, 20, 0.03) 0,
+      rgba(57, 255, 20, 0.03) 1px,
+      transparent 1px,
+      transparent 5px
+    );
+  background-size: 100% 4px, 5px 100%;
   mix-blend-mode: screen;
 }
 
@@ -30,7 +49,9 @@
   z-index: 1;
   pointer-events: none;
   content: "";
-  background: radial-gradient(circle, transparent 58%, rgba(0, 0, 0, 0.45) 100%);
+  background:
+    radial-gradient(circle, transparent 62%, rgba(0, 0, 0, 0.34) 100%),
+    linear-gradient(rgba(57, 255, 20, 0.08), rgba(57, 255, 20, 0.02));
 }
 
 .crtOverlay {
@@ -38,8 +59,10 @@
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background: linear-gradient(180deg, rgba(118, 255, 138, 0.06), transparent 20%, rgba(118, 255, 138, 0.03));
-  animation: flicker 5s infinite;
+  background:
+    radial-gradient(ellipse at center, rgba(57, 255, 20, 0.16), transparent 68%),
+    linear-gradient(180deg, rgba(57, 255, 20, 0.1), rgba(57, 255, 20, 0.03) 36%, transparent);
+  animation: flicker 3.8s infinite;
 }
 
 .topBar,
@@ -53,11 +76,11 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  min-height: 68px;
-  border-bottom: 1px solid rgba(111, 255, 127, 0.44);
-  padding: 14px 22px;
-  background: rgba(2, 10, 4, 0.88);
-  box-shadow: 0 0 28px rgba(44, 255, 102, 0.12);
+  min-height: 58px;
+  border-bottom: 2px solid rgba(57, 255, 20, 0.62);
+  padding: 8px 22px;
+  background: rgba(2, 14, 1, 0.98);
+  box-shadow: 0 0 24px rgba(57, 255, 20, 0.18);
 }
 
 .topBar > div {
@@ -76,71 +99,175 @@
 }
 
 .brand {
-  color: #d1ffd5;
+  color: #d7ffd1;
+  font-size: 22px;
 }
 
 .topStatus {
-  color: #5aff70;
+  color: #39ff14;
+  font-size: 22px;
 }
 
 .walletBox {
   justify-content: flex-end;
-  color: #b9ffc2;
-  font-size: 12px;
+  color: #9cff8f;
+  font-size: 22px;
+  min-width: fit-content;
   white-space: nowrap;
 }
 
 .walletBox :global(button) {
   min-height: 34px;
-  border: 1px solid rgba(141, 255, 154, 0.74) !important;
-  border-radius: 2px !important;
-  background: rgba(3, 18, 8, 0.94) !important;
-  color: #c8ffce !important;
-  font-family: var(--font-fira-code), var(--font-geist-mono), monospace !important;
-  font-size: 12px !important;
-  font-weight: 700 !important;
-  text-shadow: 0 0 7px rgba(141, 255, 154, 0.9);
-  box-shadow: inset 0 0 18px rgba(33, 255, 89, 0.1), 0 0 14px rgba(33, 255, 89, 0.16);
+  border: 2px solid rgba(57, 255, 20, 0.82) !important;
+  border-radius: 0 !important;
+  background: rgba(1, 10, 1, 0.96) !important;
+  color: #d7ffd1 !important;
+  font-family: var(--font-vt323), monospace !important;
+  font-size: 22px !important;
+  font-weight: 400 !important;
+  text-shadow: 0 0 8px rgba(57, 255, 20, 0.95);
+  box-shadow: inset 0 0 10px rgba(57, 255, 20, 0.18), 0 0 12px rgba(57, 255, 20, 0.18);
 }
 
 .terminal {
   display: grid;
-  gap: 16px;
-  width: min(1180px, calc(100% - 28px));
-  margin: 0 auto;
-  padding: 18px 0 28px;
+  gap: 12px;
+  align-content: start;
+  width: 100%;
+  min-height: 0;
+  height: auto;
+  margin: 0;
+  overflow-y: auto;
+  padding: 0;
 }
 
 .bootPanel,
 .terminalPanel,
 .statusPanel {
-  border: 1px solid rgba(111, 255, 127, 0.52);
-  border-radius: 3px;
-  background: rgba(2, 12, 4, 0.84);
+  border: 2px solid rgba(57, 255, 20, 0.66);
+  border-radius: 0;
+  background: rgba(2, 12, 1, 0.9);
   box-shadow:
-    inset 0 0 32px rgba(50, 255, 90, 0.08),
-    0 0 24px rgba(50, 255, 90, 0.1);
+    inset 0 0 36px rgba(57, 255, 20, 0.14),
+    0 0 20px rgba(57, 255, 20, 0.18);
 }
 
 .bootPanel {
-  min-height: 560px;
-  padding: 22px;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto auto;
+  min-height: 100%;
+  padding: 16px 22px 18px;
+}
+
+.statusPanel,
+.panelGrid,
+.terminal > .terminalPanel {
+  margin-inline: 16px;
+}
+
+.arcadeMasthead {
+  display: grid;
+  justify-items: center;
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+.brandPlate {
+  position: relative;
+  width: min(760px, 100%);
+  border: 4px double rgba(57, 255, 20, 0.92);
+  padding: 8px 18px 12px;
+  background:
+    linear-gradient(180deg, rgba(57, 255, 20, 0.2), rgba(57, 255, 20, 0.04) 44%, transparent),
+    rgba(1, 11, 1, 0.95);
+  box-shadow:
+    inset 0 0 18px rgba(57, 255, 20, 0.18),
+    0 0 18px rgba(57, 255, 20, 0.22);
+}
+
+.brandPlate::before,
+.brandPlate::after {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  width: 12px;
+  border-block: 2px solid rgba(215, 255, 209, 0.72);
+  content: "";
+}
+
+.brandPlate::before {
+  left: 8px;
+  border-left: 2px solid rgba(215, 255, 209, 0.72);
+}
+
+.brandPlate::after {
+  right: 8px;
+  border-right: 2px solid rgba(215, 255, 209, 0.72);
 }
 
 .banner {
-  overflow-x: auto;
-  color: #caffce;
-  font-size: clamp(10px, 1.55vw, 18px);
-  font-weight: 700;
-  line-height: 1.08;
-  text-shadow: 0 0 8px rgba(151, 255, 162, 0.86);
+  overflow: hidden;
+  color: #d7ffd1;
+  font-size: clamp(62px, 11vw, 118px);
+  font-weight: 400;
+  line-height: 0.72;
+  text-transform: uppercase;
+  text-shadow:
+    0 0 2px #39ff14,
+    0 0 12px rgba(57, 255, 20, 0.94),
+    0 0 28px rgba(57, 255, 20, 0.4);
+}
+
+.cockpitGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.86fr);
+  gap: 18px;
+  margin-bottom: 12px;
+}
+
+.miniPanel,
+.consolePanel {
+  border: 4px double rgba(57, 255, 20, 0.82);
+  background: rgba(1, 12, 1, 0.94);
+  box-shadow:
+    inset 0 0 18px rgba(57, 255, 20, 0.12),
+    0 0 10px rgba(57, 255, 20, 0.16);
+}
+
+.miniPanel {
+  min-height: 104px;
+  padding: 10px 16px;
+}
+
+.miniPanel h2,
+.consolePanel h2 {
+  margin-bottom: 6px;
+  color: #d7ffd1;
+  font-size: 26px;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.miniPanel p {
+  color: #39ff14;
+  font-size: 24px;
+  line-height: 1.12;
+  overflow-wrap: anywhere;
+}
+
+.consolePanel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  position: relative;
+  min-height: 0;
+  padding: 10px 16px;
 }
 
 .rule {
   overflow: hidden;
   margin: 14px 0;
-  color: #48ff61;
-  font-size: 12px;
+  color: #39ff14;
+  font-size: 22px;
   white-space: nowrap;
 }
 
@@ -148,8 +275,8 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px 22px;
-  color: #baffc2;
-  font-size: 13px;
+  color: #b8ffaf;
+  font-size: 24px;
   line-height: 1.45;
 }
 
@@ -157,64 +284,66 @@
   display: grid;
   align-content: start;
   gap: 8px;
-  min-height: 190px;
-  max-height: 310px;
-  overflow: auto;
-  border-block: 1px dashed rgba(111, 255, 127, 0.32);
-  margin: 18px 0;
-  padding: 14px 0;
+  min-height: 0;
+  overflow: visible;
+  border: 0;
+  margin: 0;
+  padding: 0 0 4px;
 }
 
 .logLine,
 .successLine,
 .warningLine,
 .errorLine {
-  overflow: hidden;
+  overflow: visible;
+  min-width: 0;
   max-width: 100%;
   color: #8dff9a;
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: 24px;
+  line-height: 1.28;
   overflow-wrap: anywhere;
-  animation: terminalType 520ms steps(42, end);
+  word-break: break-word;
+  animation: terminalType 420ms steps(8, end);
 }
 
 .logLine span,
 .successLine span,
 .warningLine span,
 .errorLine span {
-  color: #d7ffdb;
-  font-weight: 700;
+  color: #d7ffd1;
+  font-weight: 400;
 }
 
 .successLine {
-  color: #5dff82;
+  color: #39ff14;
 }
 
 .warningLine {
-  color: #ffd166;
-  text-shadow: 0 0 6px rgba(255, 209, 102, 0.55);
+  color: #b8ffaf;
+  text-shadow: 0 0 8px rgba(57, 255, 20, 0.72);
 }
 
 .errorLine {
-  color: #ff6b6b;
-  text-shadow: 0 0 6px rgba(255, 107, 107, 0.6);
+  color: #e6ffe2;
+  text-shadow: 0 0 10px rgba(57, 255, 20, 0.9);
 }
 
 .promptForm {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) 14px auto;
   align-items: center;
   gap: 10px;
-  border: 1px solid rgba(111, 255, 127, 0.5);
-  border-radius: 2px;
-  padding: 11px 12px;
-  background: rgba(0, 0, 0, 0.44);
+  border: 4px double rgba(57, 255, 20, 0.82);
+  border-radius: 0;
+  margin-top: 12px;
+  padding: 8px 14px;
+  background: rgba(1, 10, 1, 0.96);
 }
 
 .promptForm label {
-  color: #caffce;
-  font-size: 13px;
-  font-weight: 700;
+  color: #d7ffd1;
+  font-size: 25px;
+  font-weight: 400;
   white-space: nowrap;
 }
 
@@ -224,35 +353,47 @@
   border: 0;
   outline: 0;
   background: transparent;
-  color: #caffce;
+  color: #d7ffd1;
   font-family: inherit;
-  font-size: 14px;
+  font-size: 25px;
   text-shadow: inherit;
+  caret-color: transparent;
 }
 
 .promptForm input::placeholder {
-  color: rgba(141, 255, 154, 0.55);
+  color: rgba(57, 255, 20, 0.55);
 }
 
 .promptForm:focus-within {
-  border-color: #caffce;
-  box-shadow: 0 0 18px rgba(141, 255, 154, 0.22);
+  border-color: #d7ffd1;
+  box-shadow: 0 0 18px rgba(57, 255, 20, 0.28);
+}
+
+.cursor {
+  display: inline-block;
+  width: 12px;
+  height: 25px;
+  background: #39ff14;
+  box-shadow:
+    0 0 4px #39ff14,
+    0 0 14px rgba(57, 255, 20, 0.9);
+  animation: blinkCursor 850ms steps(1, end) infinite;
 }
 
 .promptForm button,
 .actions button,
 .history button {
-  border: 1px solid rgba(141, 255, 154, 0.68);
-  border-radius: 2px;
-  background: rgba(4, 22, 7, 0.84);
-  color: #caffce;
+  border: 2px solid rgba(57, 255, 20, 0.72);
+  border-radius: 0;
+  background: rgba(1, 10, 1, 0.96);
+  color: #d7ffd1;
   cursor: pointer;
   font-family: inherit;
-  font-size: 12px;
-  font-weight: 800;
+  font-size: 24px;
+  font-weight: 400;
   letter-spacing: 0;
   text-shadow: inherit;
-  box-shadow: inset 0 0 16px rgba(67, 255, 99, 0.08);
+  box-shadow: inset 0 0 12px rgba(57, 255, 20, 0.1);
 }
 
 .promptForm button {
@@ -263,7 +404,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin-top: 16px;
+  margin-top: 12px;
 }
 
 .actions button {
@@ -273,8 +414,8 @@
 .promptForm button:hover,
 .actions button:hover,
 .history button:hover {
-  border-color: #e3ffe6;
-  background: rgba(22, 65, 28, 0.9);
+  border-color: #d7ffd1;
+  background: rgba(57, 255, 20, 0.12);
 }
 
 .actions button:disabled,
@@ -284,9 +425,9 @@
 }
 
 .hint {
-  margin-top: 10px;
-  color: rgba(185, 255, 194, 0.72);
-  font-size: 12px;
+  margin-top: 8px;
+  color: rgba(184, 255, 175, 0.72);
+  font-size: 22px;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
@@ -303,7 +444,7 @@
   justify-content: space-between;
   gap: 12px;
   min-width: 0;
-  border-right: 1px solid rgba(111, 255, 127, 0.28);
+  border-right: 2px solid rgba(57, 255, 20, 0.34);
   padding: 14px;
 }
 
@@ -312,14 +453,14 @@
 }
 
 .metricLine span {
-  color: rgba(202, 255, 206, 0.74);
-  font-size: 12px;
-  font-weight: 800;
+  color: rgba(184, 255, 175, 0.78);
+  font-size: 22px;
+  font-weight: 400;
 }
 
 .metricLine strong {
-  color: #ffffff;
-  font-size: 18px;
+  color: #d7ffd1;
+  font-size: 28px;
   overflow-wrap: anywhere;
 }
 
@@ -336,8 +477,8 @@
 .terminalPanel h2,
 .panelHeader h2 {
   color: #d7ffdb;
-  font-size: 14px;
-  font-weight: 800;
+  font-size: 25px;
+  font-weight: 400;
   letter-spacing: 0;
 }
 
@@ -350,8 +491,8 @@
 }
 
 .panelHeader span {
-  color: #ffd166;
-  font-size: 12px;
+  color: #b8ffaf;
+  font-size: 22px;
 }
 
 .timeline {
@@ -365,13 +506,13 @@
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);
   gap: 10px;
-  color: rgba(185, 255, 194, 0.55);
-  font-size: 13px;
-  line-height: 1.5;
+  color: rgba(184, 255, 175, 0.58);
+  font-size: 24px;
+  line-height: 1.2;
 }
 
 .timeline span {
-  color: #ffd166;
+  color: #b8ffaf;
 }
 
 .timeline .done {
@@ -379,7 +520,7 @@
 }
 
 .timeline .done span {
-  color: #ffffff;
+  color: #d7ffd1;
 }
 
 .proofList {
@@ -395,15 +536,15 @@
 
 .proofList dt,
 .reportSummary span {
-  color: rgba(202, 255, 206, 0.78);
-  font-size: 11px;
-  font-weight: 800;
+  color: rgba(184, 255, 175, 0.78);
+  font-size: 21px;
+  font-weight: 400;
 }
 
 .proofList dd {
   overflow-wrap: anywhere;
-  color: #8dff9a;
-  font-size: 12px;
+  color: #39ff14;
+  font-size: 22px;
 }
 
 .history {
@@ -423,14 +564,14 @@
 }
 
 .history span {
-  color: #ffd166;
-  font-size: 11px;
+  color: #b8ffaf;
+  font-size: 21px;
   text-transform: uppercase;
 }
 
 .history strong {
   overflow: hidden;
-  font-size: 12px;
+  font-size: 22px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -443,7 +584,7 @@
 }
 
 .reportSummary div {
-  border: 1px dashed rgba(111, 255, 127, 0.26);
+  border: 2px dashed rgba(57, 255, 20, 0.3);
   padding: 12px;
 }
 
@@ -452,29 +593,29 @@
   display: grid;
   gap: 7px;
   margin: 8px 0 0 18px;
-  color: #8dff9a;
-  font-size: 12px;
-  line-height: 1.5;
+  color: #39ff14;
+  font-size: 22px;
+  line-height: 1.25;
 }
 
 .reportSummary p,
 .reportSummary small {
   display: block;
   margin-top: 8px;
-  color: #8dff9a;
-  font-size: 12px;
-  line-height: 1.5;
+  color: #39ff14;
+  font-size: 22px;
+  line-height: 1.25;
   overflow-wrap: anywhere;
 }
 
 .reportSummary small {
-  color: rgba(185, 255, 194, 0.66);
+  color: rgba(184, 255, 175, 0.68);
 }
 
 .table {
   display: grid;
   overflow: hidden;
-  border: 1px solid rgba(111, 255, 127, 0.34);
+  border: 2px solid rgba(57, 255, 20, 0.42);
 }
 
 .tableHead,
@@ -487,18 +628,18 @@
 }
 
 .tableHead {
-  border-bottom: 1px solid rgba(111, 255, 127, 0.34);
-  background: rgba(30, 255, 78, 0.08);
-  color: #d7ffdb;
-  font-size: 11px;
-  font-weight: 800;
+  border-bottom: 2px solid rgba(57, 255, 20, 0.42);
+  background: rgba(57, 255, 20, 0.1);
+  color: #d7ffd1;
+  font-size: 21px;
+  font-weight: 400;
 }
 
 .tableRow {
-  border-top: 1px dashed rgba(111, 255, 127, 0.18);
-  color: #8dff9a;
-  font-size: 12px;
-  line-height: 1.5;
+  border-top: 2px dashed rgba(57, 255, 20, 0.18);
+  color: #39ff14;
+  font-size: 22px;
+  line-height: 1.2;
 }
 
 .tableRow:first-of-type {
@@ -513,7 +654,7 @@
 
 .tableRow small {
   margin-top: 4px;
-  color: rgba(185, 255, 194, 0.66);
+  color: rgba(184, 255, 175, 0.68);
 }
 
 .critical,
@@ -522,28 +663,28 @@
 .info {
   display: inline-block;
   width: fit-content;
-  border: 1px solid currentColor;
-  border-radius: 2px;
+  border: 2px solid currentColor;
+  border-radius: 0;
   padding: 3px 7px;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 21px;
+  font-weight: 400;
   text-transform: uppercase;
 }
 
 .critical {
-  color: #ff6b6b;
+  color: #d7ffd1;
 }
 
 .high {
-  color: #ffd166;
+  color: #b8ffaf;
 }
 
 .medium {
-  color: #70d6ff;
+  color: #8dff7b;
 }
 
 .info {
-  color: #8dff9a;
+  color: #39ff14;
 }
 
 @keyframes terminalType {
@@ -553,6 +694,18 @@
 
   to {
     clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes blinkCursor {
+  0%,
+  46% {
+    opacity: 1;
+  }
+
+  47%,
+  100% {
+    opacity: 0;
   }
 }
 
@@ -576,31 +729,105 @@
 }
 
 @media (max-width: 900px) {
-  .topBar,
-  .topBar > div,
-  .walletBox {
-    align-items: flex-start;
-    flex-direction: column;
+  .topBar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    min-height: 0;
+    padding: 8px 10px;
   }
 
-  .topBar {
-    padding: 14px;
+  .topBar > div {
+    align-items: center;
+    gap: 6px;
+  }
+
+  .topBar > div:first-child {
+    display: grid;
+    gap: 2px;
+  }
+
+  .walletBox {
+    justify-self: end;
+    font-size: 18px;
   }
 
   .brand,
-  .topStatus,
-  .walletBox {
-    white-space: normal;
+  .topStatus {
+    overflow: hidden;
+    max-width: 100%;
+    line-height: 0.92;
+    text-overflow: clip;
+    white-space: nowrap;
+  }
+
+  .brand {
+    font-size: 16px;
+  }
+
+  .topStatus {
+    font-size: 16px;
+  }
+
+  .walletBox :global(button) {
+    min-height: 30px;
+    padding: 4px 8px !important;
+    font-size: 18px !important;
   }
 
   .terminal {
-    width: min(100% - 18px, 1180px);
-    padding-top: 10px;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    padding-top: 0;
   }
 
   .bootPanel {
-    min-height: auto;
-    padding: 14px;
+    min-height: 100%;
+    padding: 12px;
+  }
+
+  .arcadeMasthead {
+    overflow: hidden;
+    margin-bottom: 10px;
+  }
+
+  .brandPlate {
+    padding: 6px 14px 9px;
+  }
+
+  .banner {
+    max-width: 100%;
+    font-size: clamp(52px, 15vw, 74px);
+  }
+
+  .cockpitGrid {
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .miniPanel {
+    min-height: 0;
+    padding: 8px 12px;
+  }
+
+  .miniPanel h2,
+  .consolePanel h2 {
+    font-size: 23px;
+  }
+
+  .miniPanel p,
+  .logLine,
+  .successLine,
+  .warningLine,
+  .errorLine {
+    font-size: 22px;
+  }
+
+  .statusPanel,
+  .panelGrid,
+  .terminal > .terminalPanel {
+    margin-inline: 10px;
   }
 
   .systemGrid,
@@ -630,5 +857,208 @@
 
   .tableHead {
     display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .shell {
+    font-size: 20px;
+    text-shadow:
+      0 0 1px #39ff14,
+      0 0 5px rgba(57, 255, 20, 0.5);
+  }
+
+  .topBar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    min-height: 48px;
+    padding: 7px 8px;
+  }
+
+  .brand,
+  .topStatus {
+    font-size: 15px;
+    line-height: 0.95;
+  }
+
+  .walletBox :global(button) {
+    min-height: 29px;
+    max-width: 122px;
+    padding: 3px 7px !important;
+    overflow: hidden !important;
+    font-size: 17px !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+
+  .terminal {
+    display: block;
+    height: auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .bootPanel {
+    display: block;
+    min-height: auto;
+    padding: 10px 9px 12px;
+  }
+
+  .arcadeMasthead {
+    margin-bottom: 10px;
+  }
+
+  .brandPlate {
+    width: 100%;
+    border-width: 3px;
+    padding: 6px 16px 8px;
+  }
+
+  .brandPlate::before,
+  .brandPlate::after {
+    top: 7px;
+    bottom: 7px;
+    width: 9px;
+  }
+
+  .banner {
+    font-size: clamp(43px, 14.5vw, 58px);
+    line-height: 0.78;
+  }
+
+  .cockpitGrid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .miniPanel,
+  .consolePanel {
+    border-width: 3px;
+  }
+
+  .miniPanel {
+    min-height: auto;
+    padding: 8px 10px;
+  }
+
+  .miniPanel h2,
+  .consolePanel h2 {
+    margin-bottom: 5px;
+    font-size: 21px;
+  }
+
+  .miniPanel p,
+  .logLine,
+  .successLine,
+  .warningLine,
+  .errorLine {
+    font-size: 20px;
+    line-height: 1.18;
+    animation: none;
+  }
+
+  .consolePanel {
+    display: block;
+    margin-top: 8px;
+    padding: 8px 10px;
+  }
+
+  .logStream {
+    gap: 6px;
+    max-height: none;
+  }
+
+  .promptForm {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 7px;
+    border-width: 3px;
+    margin-top: 8px;
+    padding: 8px 10px;
+  }
+
+  .promptForm label {
+    grid-column: 1 / -1;
+    font-size: 22px;
+    line-height: 1;
+    white-space: normal;
+  }
+
+  .promptForm input {
+    font-size: 21px;
+    line-height: 1.1;
+  }
+
+  .promptForm input::placeholder {
+    font-size: 19px;
+  }
+
+  .cursor {
+    width: 10px;
+    height: 21px;
+  }
+
+  .promptForm button {
+    grid-column: 1 / -1;
+    padding: 6px 10px;
+    font-size: 22px;
+  }
+
+  .hint {
+    margin-top: 7px;
+    font-size: 19px;
+    line-height: 1.15;
+  }
+
+  .actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .actions button {
+    min-width: 0;
+    padding: 8px 6px;
+    overflow-wrap: anywhere;
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  .statusPanel,
+  .panelGrid,
+  .terminal > .terminalPanel {
+    margin: 10px 9px 0;
+  }
+}
+
+@media (max-width: 360px) {
+  .brand {
+    font-size: 14px;
+  }
+
+  .topStatus {
+    font-size: 14px;
+  }
+
+  .walletBox :global(button) {
+    max-width: 112px;
+    font-size: 16px !important;
+  }
+
+  .banner {
+    font-size: clamp(40px, 14vw, 50px);
+  }
+
+  .miniPanel p,
+  .logLine,
+  .successLine,
+  .warningLine,
+  .errorLine {
+    font-size: 19px;
+  }
+
+  .actions {
+    grid-template-columns: 1fr;
   }
 }

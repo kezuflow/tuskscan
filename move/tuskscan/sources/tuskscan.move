@@ -10,8 +10,9 @@ module tuskscan::audit {
 
     const E_INSUFFICIENT_PAYMENT: u64 = 0;
     const E_JOB_ALREADY_FINALIZED: u64 = 1;
+    const E_INVALID_OPERATOR: u64 = 2;
 
-    const INITIAL_PRICE_MIST: u64 = 100000000;
+    const INITIAL_PRICE_MIST: u64 = 1000000;
 
     const STATUS_PAID: u8 = 1;
     const STATUS_COMPLETED: u8 = 3;
@@ -115,6 +116,7 @@ module tuskscan::audit {
     }
 
     entry fun set_operator(_: &OperatorCap, config: &mut AuditConfig, operator: address) {
+        assert!(operator != @0x0, E_INVALID_OPERATOR);
         config.operator = operator;
     }
 

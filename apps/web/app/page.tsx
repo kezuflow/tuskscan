@@ -170,6 +170,7 @@ const apiBase = process.env.NEXT_PUBLIC_TUSKSCAN_API_URL ?? "http://localhost:87
 const contractPackageId = process.env.NEXT_PUBLIC_TUSKSCAN_PACKAGE_ID;
 const configObjectId = process.env.NEXT_PUBLIC_TUSKSCAN_CONFIG_ID;
 const network = process.env.NEXT_PUBLIC_TUSKSCAN_NETWORK === "mainnet" ? "mainnet" : "testnet";
+const zeroSuiAddress = "0x0000000000000000000000000000000000000000000000000000000000000000";
 const samplePackage =
   "https://github.com/kezuflow/tuskscan/tree/main/move/demo-package-a";
 const bannerText = "TUSKSCAN";
@@ -190,6 +191,7 @@ export default function Home() {
   const [terminalLogs, setTerminalLogs] = useState<TerminalLog[]>(initialLogs);
   const [walletAudits, setWalletAudits] = useState<AuditJob[]>([]);
   const logId = useRef(initialLogs.length + 1);
+  const terminalRef = useRef<HTMLElement | null>(null);
   const previousWallet = useRef<string | null>(null);
 
   const walletLabel = account ? shorten(account.address) : "[ DISCONNECTED ]";
@@ -203,6 +205,19 @@ export default function Home() {
       uri: `walrus://${pointer.blobId}`,
     }));
   }, [audit]);
+  const paymentDisabledReason = !account
+    ? "CONNECT_WALLET_REQUIRED"
+    : !contractPackageId
+      ? "NEXT_PUBLIC_TUSKSCAN_PACKAGE_ID_MISSING"
+      : !configObjectId
+        ? "NEXT_PUBLIC_TUSKSCAN_CONFIG_ID_MISSING"
+        : !prepared
+          ? "PREPARE_SCAN_REQUIRED"
+          : state === "running"
+            ? "SCAN_ALREADY_RUNNING"
+            : signAndExecute.isPending || signPersonalMessage.isPending
+              ? "WALLET_REQUEST_PENDING"
+              : "";
 
   const appendLogs = useCallback((entries: Omit<TerminalLog, "id">[]) => {
     entries.forEach((entry, index) => {
@@ -281,6 +296,9 @@ export default function Home() {
       setAudit(null);
       setPackageId(response.packageSummary.packageId);
       setState("prepared");
+      requestAnimationFrame(() => {
+        terminalRef.current?.scrollTo({ top: 0 });
+      });
       appendLogs([
         ...(targetPackage
           ? []
@@ -512,7 +530,7 @@ export default function Home() {
         </div>
       </header>
 
-      <section className={styles.terminal}>
+      <section className={styles.terminal} ref={terminalRef}>
         <section className={styles.bootPanel} aria-label="TuskScan terminal">
           <div className={styles.arcadeMasthead}>
             <div className={styles.brandPlate}>
@@ -573,16 +591,9 @@ export default function Home() {
               [ PREPARE ]
             </button>
             <button
-              disabled={
-                !account ||
-                !contractPackageId ||
-                !configObjectId ||
-                !prepared ||
-                state === "running" ||
-                signAndExecute.isPending ||
-                signPersonalMessage.isPending
-              }
+              disabled={Boolean(paymentDisabledReason)}
               onClick={runPaidAudit}
+              title={paymentDisabledReason || "Pay and run audit"}
               type="button"
             >
               [ PAY_AND_RUN ]
@@ -597,6 +608,9 @@ export default function Home() {
             <button onClick={fillDemo} type="button">
               [ FILL_DEMO ]
             </button>
+            {paymentDisabledReason ? (
+              <span className={styles.actionHint}>PAY_LOCK: {paymentDisabledReason}</span>
+            ) : null}
           </div>
         </section>
 
@@ -822,6 +836,12 @@ export default function Home() {
       throw new Error("Connect a Sui wallet before paying.");
     }
 
+    await assertLivePaymentConfig({
+      configObjectId,
+      expectedPriceMist: input.priceMist,
+      suiClient,
+    });
+
     const tx = new Transaction();
     const [paymentCoin] = tx.splitCoins(tx.gas, [input.priceMist]);
     tx.moveCall({
@@ -858,6 +878,31 @@ export default function Home() {
       digest: result.digest,
       jobObjectId: createdJob.objectId,
     };
+  }
+
+  async function assertLivePaymentConfig(input: {
+    configObjectId: string;
+    expectedPriceMist: string;
+    suiClient: ReturnType<typeof useSuiClient>;
+  }) {
+    const config = await input.suiClient.getObject({
+      id: input.configObjectId,
+      options: { showContent: true },
+    });
+    const content = config.data?.content;
+    const fields =
+      content && "fields" in content ? (content.fields as Record<string, unknown>) : null;
+    const operator = typeof fields?.operator === "string" ? fields.operator : "";
+    const priceMist = String(fields?.price_mist ?? "");
+
+    if (!operator || isZeroAddress(operator)) {
+      throw new Error("Payment halted: onchain AuditConfig operator is the zero address.");
+    }
+    if (priceMist !== input.expectedPriceMist) {
+      throw new Error(
+        `Payment halted: stale price quote. Chain expects ${priceMist} MIST, app prepared ${input.expectedPriceMist} MIST. Prepare again after restarting the API.`,
+      );
+    }
   }
 
   async function createPrivateReportSession(address: string) {
@@ -971,6 +1016,14 @@ function toneClass(tone: TerminalLog["tone"], stylesObject: Record<string, strin
 function shorten(value: string) {
   if (value.length <= 18) return value;
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
+}
+
+function isZeroAddress(value: string) {
+  try {
+    return BigInt(value) === 0n || value.toLowerCase() === zeroSuiAddress;
+  } catch {
+    return value.toLowerCase() === zeroSuiAddress;
+  }
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {

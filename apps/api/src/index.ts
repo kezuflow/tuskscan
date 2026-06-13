@@ -188,7 +188,7 @@ type AuditJobStore = {
 
 type AuditJobProcessor = (jobId: string) => Promise<void>;
 
-const DEFAULT_PRICE_MIST = "100000000";
+const DEFAULT_PRICE_MIST = "1000000";
 const JOB_LOCK_MS = 10 * 60 * 1000;
 const SESSION_TTL_MS = 15 * 60 * 1000;
 const execFileAsync = promisify(execFile);

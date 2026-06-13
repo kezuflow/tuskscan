@@ -34,6 +34,6 @@ input {
 }
 
 ::selection {
-  background: #b8ffaf;
-  color: #020900;
+  background: rgba(57, 255, 20, 0.22);
+  color: #d7ffd1;
 }

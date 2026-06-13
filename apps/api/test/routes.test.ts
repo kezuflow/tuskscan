@@ -267,7 +267,7 @@ async function startTestServer(options: { sourceContext?: SourceContext } = {}) 
     config: {
       environment: "localhost",
       network: "testnet",
-      priceMist: "100000000",
+      priceMist: "1000000",
       tuskscanPackageId:
         "0x0000000000000000000000000000000000000000000000000000000000000009",
     },

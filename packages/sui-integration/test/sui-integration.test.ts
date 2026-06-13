@@ -80,7 +80,7 @@ test("verifies paid audit jobs against Sui transaction and object data", async (
       packageDigest: "snapshot-hash",
       packageId: "github:example/repo/move/package#0xabc",
       payer: "0x8",
-      priceMist: "100000000",
+      priceMist: "1000000",
       rpcUrl: "http://127.0.0.1:1",
     });
   } finally {
@@ -102,7 +102,7 @@ test("rejects paid audit jobs that did not credit the configured operator", asyn
           packageDigest: "snapshot-hash",
           packageId: "github:example/repo/move/package#0xabc",
           payer: "0x8",
-          priceMist: "100000000",
+          priceMist: "1000000",
           rpcUrl: "http://127.0.0.1:1",
         }),
       SuiAuditVerificationError,
@@ -142,7 +142,7 @@ function mockSuiPaymentRpc(options: { operatorWasPaid: boolean }) {
         balanceChanges: options.operatorWasPaid
           ? [
               {
-                amount: "100000000",
+                amount: "1000000",
                 coinType: "0x2::sui::SUI",
                 owner: { AddressOwner: operatorAddress },
               },
@@ -166,7 +166,7 @@ function mockSuiPaymentRpc(options: { operatorWasPaid: boolean }) {
             fields: {
               package_digest: "snapshot-hash",
               package_id: packageId,
-              price_paid: "100000000",
+              price_paid: "1000000",
               status: 1,
             },
             type: `${contractPackageId}::audit::AuditJob`,

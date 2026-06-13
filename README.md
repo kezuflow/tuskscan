@@ -61,6 +61,7 @@ flowchart LR
 - `move/tuskscan`: Sui Move package for `AuditJob`, `AuditReport`, and operator finalization.
 - `move/demo-package-a`: intentionally unsafe demo package that teaches memory.
 - `move/demo-package-b`: intentionally unsafe demo package that should recall memory from A.
+- `move/demo-package-c`: intentionally unsafe lottery package for predictable randomness and vector-bound findings.
 - `docs/demo-packages.md`: publish commands and package ID recording area.
 
 ## Setup
@@ -182,6 +183,9 @@ sui client publish --gas-budget 100000000
 
 cd E:\GithubProjects\sui-overflow\tuskscan\move\demo-package-b
 sui client publish --gas-budget 100000000
+
+cd E:\GithubProjects\sui-overflow\tuskscan\move\demo-package-c
+sui client publish --gas-budget 100000000
 ```
 
 Record IDs in `docs/demo-packages.md`.
@@ -190,8 +194,9 @@ Record IDs in `docs/demo-packages.md`.
 4. Connect wallet.
 5. Prepare Package A, pay, run audit, and verify artifacts.
 6. Prepare Package B, pay, run audit, and confirm at least one memory-assisted finding.
+7. Prepare Package C, pay, run audit, and confirm predictable randomness/vector-bound findings.
 
-The pitch: Package A teaches the agent an exploit pattern; Package B proves the memory is portable and reusable through the Walrus/MemWal data layer.
+The pitch: Package A teaches the agent an exploit pattern; Package B proves the memory is portable and reusable through the Walrus/MemWal data layer; Package C shows the scanner also catches different source-aware bug classes.
 
 ## MemWal Memory Model
 
@@ -237,5 +242,8 @@ cd E:\GithubProjects\sui-overflow\tuskscan\move\demo-package-a
 sui move test
 
 cd E:\GithubProjects\sui-overflow\tuskscan\move\demo-package-b
+sui move test
+
+cd E:\GithubProjects\sui-overflow\tuskscan\move\demo-package-c
 sui move test
 ```

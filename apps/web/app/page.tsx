@@ -743,10 +743,7 @@ export default function Home() {
       </aside>
       <header className={styles.topBar}>
         <div>
-          <span className={styles.brand}>
-            <Image alt="" aria-hidden="true" height={18} src="/tusk-logo.webp" width={18} />
-            &gt; TUSKSCAN
-          </span>
+          <span className={styles.brand}>&gt; TUSKSCAN</span>
           <span className={styles.topStatus}>
             [PROJECT: SUI_MOVE] [STATUS: {stateLabel(state).toUpperCase()}]
           </span>

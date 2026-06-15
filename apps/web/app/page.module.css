@@ -132,23 +132,10 @@
 }
 
 .brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
   color: #7fca60;
   font-size: 15px;
   font-weight: 800;
   line-height: 1;
-}
-
-.brand img {
-  display: block;
-  width: 18px;
-  height: 18px;
-  border: 1px solid #3f6f34;
-  border-radius: 3px;
-  background: #0b0b0a;
-  object-fit: contain;
 }
 
 .topStatus {

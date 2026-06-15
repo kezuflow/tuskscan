@@ -19,6 +19,10 @@ export const metadata: Metadata = {
   title: "TuskScan",
   description:
     "Walrus-backed AI pre-audits for deployed Sui Move packages.",
+  icons: {
+    icon: [{ rel: "icon", type: "image/webp", url: "/tusk-logo.webp" }],
+    shortcut: [{ rel: "shortcut icon", type: "image/webp", url: "/tusk-logo.webp" }],
+  },
 };
 
 export default function RootLayout({

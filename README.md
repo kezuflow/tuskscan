@@ -53,8 +53,7 @@ flowchart LR
 ## Workspace
 
 - `apps/web`: Next.js app with Sui wallet connect, package prepare, payment/run flow, report/proof UI.
-- `apps/api`: Node HTTP API for prepare/create/status/report/verify routes.
-- `apps/worker`: paid audit worker with retry/dead-letter behavior.
+- `apps/api`: Node HTTP API for prepare/create/status/report/verify routes plus the paid audit database queue worker.
 - `packages/shared`: shared audit/report types.
 - `packages/sui-integration`: Sui JSON-RPC package normalization and stable hashing.
 - `packages/audit-core`: deterministic scanner rules and agent workflow.
@@ -121,29 +120,40 @@ TUSKSCAN_OPERATOR_CAP_ID=<OperatorCap object id created when move/tuskscan was p
 TUSKSCAN_OPERATOR_PRIVATE_KEY=<operator Ed25519 private key for finalize_report>
 WALRUS_AGGREGATOR_URL=https://aggregator.walrus-mainnet.walrus.space
 WALRUS_STORAGE_EPOCHS=3
+WALRUS_WRITE_TIMEOUT_MS=120000
+TUSKSCAN_PROCESS_JOBS_IN_API=0
 MEMWAL_PRIVATE_KEY=<MemWal delegate/private key>
 MEMWAL_ACCOUNT_ID=<MemWal account id>
 MEMWAL_NAMESPACE=tuskscan
 MEMWAL_SERVER_URL=https://relayer.memwal.ai
-LLM_API_KEY=<optional OpenAI-compatible API key for researcher/exploit/critic agents>
-LLM_MODEL=gpt-4.1-mini
-LLM_BASE_URL=https://api.openai.com/v1
+MEMWAL_WAIT_FOR_REMEMBER=1
+MEMWAL_TIMEOUT_MS=120000
+OPENROUTER_API_KEY=<optional OpenRouter API key for researcher/exploit/critic agents>
+LLM_MODEL=openai/gpt-4.1-mini
+LLM_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_HTTP_REFERER=http://localhost:3000
+OPENROUTER_APP_TITLE=TuskScan
 TUSKSCAN_RUN_MOVE_TESTS=0
 TUSKSCAN_SANDBOX_TIMEOUT_MS=120000
 TUSKSCAN_SUI_BIN=sui
 ```
 
-The API loads `apps/api/.env` automatically when run through `pnpm dev`. It no longer loads `.env.local`. The API fails on startup if Mainnet Sui, database, MemWal, Walrus SDK storage, or TuskScan contract/operator configuration is missing.
+The API package loads `apps/api/.env` automatically when run through `pnpm dev`. It no longer loads `.env.local`. The API fails on startup if Mainnet Sui, database, MemWal, Walrus SDK storage, or TuskScan contract/operator configuration is missing. Keep `TUSKSCAN_PROCESS_JOBS_IN_API=0`; the API package starts its own database queue worker in dev.
 
-For real Walrus storage, use:
+OpenRouter is supported through the OpenAI-compatible chat completions API. Setting `OPENROUTER_API_KEY` enables the LLM researcher, exploit, and critic agents with `LLM_BASE_URL=https://openrouter.ai/api/v1`; choose an `LLM_MODEL` that supports JSON mode because TuskScan requests `response_format: { type: "json_object" }`.
+
+For real Walrus artifact storage, use:
 
 ```env
 TUSKSCAN_ENV=production
 WALRUS_AGGREGATOR_URL=https://aggregator.walrus-mainnet.walrus.space
 WALRUS_STORAGE_EPOCHS=3
+WALRUS_WRITE_TIMEOUT_MS=120000
 ```
 
-Walrus Mainnet has a public Mysten aggregator, but no public unauthenticated Mysten publisher. TuskScan writes artifacts directly through the Walrus TypeScript SDK with `TUSKSCAN_OPERATOR_PRIVATE_KEY`; `WALRUS_PUBLISHER_URL` is only needed if you later choose to run a private authenticated HTTP publisher.
+Walrus Mainnet has a public Mysten aggregator, but no public unauthenticated Mysten publisher. TuskScan writes report artifacts directly through the Walrus TypeScript SDK with `TUSKSCAN_OPERATOR_PRIVATE_KEY`; `WALRUS_PUBLISHER_URL` is only needed if you later choose to run a private authenticated HTTP publisher. MemWal remains the AI memory/recall layer, not the report artifact store.
+
+`MEMWAL_WAIT_FOR_REMEMBER=1` makes the worker wait for MemWal indexing before it marks the scan complete. That keeps the package A -> package B demo deterministic because package B can immediately recall what package A just taught.
 
 Supabase is used as the app index so a wallet can see prior audits after the API restarts. Get `DATABASE_URL` from Supabase dashboard: Project Settings -> Database -> Connection string -> URI. Use the server-side Postgres connection string, not the browser anon key. The API auto-creates the `audit_jobs` table on first use; the same schema is available at `supabase/schema.sql` if you prefer running it manually in Supabase SQL Editor.
 
@@ -159,7 +169,7 @@ Set `TUSKSCAN_RUN_MOVE_TESTS=1` only on an API machine with `git` and `sui` avai
 
 ## Run
 
-Start the API:
+Start the API. This starts both the HTTP server and the database queue worker from `apps/api`:
 
 ```powershell
 pnpm --filter api dev
@@ -242,7 +252,6 @@ pnpm build
 pnpm --filter @repo/audit-core test
 pnpm --filter @repo/storage test
 pnpm --filter api test
-pnpm --filter worker test
 sui move test
 ```
 

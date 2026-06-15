@@ -1,6 +1,6 @@
 :root {
-  --background: #020900;
-  --foreground: #b8ffaf;
+  --background: #0b0b0a;
+  --foreground: #d6cfb9;
 }
 
 html,
@@ -8,13 +8,12 @@ body {
   height: 100%;
   max-width: 100vw;
   overflow: hidden;
-  overflow-x: hidden;
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: var(--font-vt323), monospace;
+  font-family: var(--font-geist-sans), Arial, sans-serif;
 }
 
 * {
@@ -34,6 +33,40 @@ input {
 }
 
 ::selection {
-  background: rgba(57, 255, 20, 0.22);
-  color: #d7ffd1;
+  background: rgba(127, 202, 96, 0.22);
+  color: #f3edd8;
+}
+
+[data-dapp-kit] {
+  letter-spacing: 0 !important;
+}
+
+[data-dapp-kit][role="menu"] {
+  min-width: 172px !important;
+  border: 1px solid #3a382f !important;
+  border-radius: 4px !important;
+  background: #171613 !important;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42) !important;
+}
+
+[data-dapp-kit][role="menu"] [role="menuitem"] {
+  min-height: 34px;
+  border-radius: 2px !important;
+  color: #d6cfb9 !important;
+  cursor: pointer;
+  font-family: var(--font-geist-mono), Consolas, monospace !important;
+  font-size: 12px !important;
+}
+
+[data-dapp-kit][role="menu"] [role="menuitem"][data-highlighted] {
+  background: #1d2a17 !important;
+  color: #8ed06c !important;
+}
+
+[data-dapp-kit][role="menu"] [role="separator"] {
+  background: #2b2a26 !important;
+}
+
+[data-dapp-kit] svg {
+  color: currentColor;
 }

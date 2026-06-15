@@ -8,7 +8,15 @@ import {
   useSuiClient,
 } from "@mysten/dapp-kit";
 import { Transaction } from "@mysten/sui/transactions";
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type MouseEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import styles from "./page.module.css";
 
@@ -52,9 +60,14 @@ type AuditReport = {
     output: string[];
     status: string;
   }>;
-  artifacts?: Record<string, { blobId: string; contentHash: string; name: string }>;
+  artifacts?: Record<
+    string,
+    { blobId: string; contentHash: string; contentType?: string; name: string; storageBlobId?: string }
+  >;
   calibration?: {
     memoryMatchedFindings: number;
+    memoryRecordsLearned?: number;
+    memoriesRecalled?: number;
     note: string;
   };
   coverage?: {
@@ -129,9 +142,15 @@ type AuditReport = {
 };
 
 type AuditJob = {
+  attempts?: number;
   createdAt?: string;
   finalizedDigest?: string;
   id: string;
+  lastError?: string;
+  lockedAt?: string;
+  lockedBy?: string;
+  lockExpiresAt?: string;
+  maxAttempts?: number;
   packageId?: string;
   publicReport?: {
     findingCount: number;
@@ -156,7 +175,7 @@ type ReportResponse = {
 
 type TerminalLog = {
   id: number;
-  section: "SYSTEM" | "AUTH" | "SCAN" | "PAYMENT" | "REPORT";
+  section: "SYSTEM" | "AUTH" | "SCAN" | "PAYMENT" | "AGENT" | "REPORT";
   text: string;
   tone?: "normal" | "success" | "warning" | "error";
 };
@@ -170,9 +189,9 @@ const apiBase = process.env.NEXT_PUBLIC_TUSKSCAN_API_URL ?? "http://localhost:87
 const contractPackageId = process.env.NEXT_PUBLIC_TUSKSCAN_PACKAGE_ID;
 const configObjectId = process.env.NEXT_PUBLIC_TUSKSCAN_CONFIG_ID;
 const network = process.env.NEXT_PUBLIC_TUSKSCAN_NETWORK === "mainnet" ? "mainnet" : "testnet";
+const suiExplorerBase =
+  network === "mainnet" ? "https://suivision.xyz" : "https://testnet.suivision.xyz";
 const zeroSuiAddress = "0x0000000000000000000000000000000000000000000000000000000000000000";
-const samplePackage =
-  "https://github.com/kezuflow/tuskscan/tree/main/move/demo-package-a";
 const bannerText = "TUSKSCAN";
 
 export default function Home() {
@@ -189,8 +208,11 @@ export default function Home() {
   const [sourceUrl, setSourceUrl] = useState("");
   const [state, setState] = useState<AuditState>("idle");
   const [terminalLogs, setTerminalLogs] = useState<TerminalLog[]>(initialLogs);
-  const [walletAudits, setWalletAudits] = useState<AuditJob[]>([]);
+  const [selectedFindingIndex, setSelectedFindingIndex] = useState(0);
+  const [activeSection, setActiveSection] = useState("scan");
   const logId = useRef(initialLogs.length + 1);
+  const logStreamRef = useRef<HTMLDivElement | null>(null);
+  const privateReportSession = useRef<{ address: string; token: string } | null>(null);
   const terminalRef = useRef<HTMLElement | null>(null);
   const previousWallet = useRef<string | null>(null);
 
@@ -200,11 +222,17 @@ export default function Home() {
   const proofRows = useMemo(() => {
     const artifacts = audit?.report?.artifacts ?? {};
     return Object.entries(artifacts).map(([name, pointer]) => ({
+      artifactName: name,
+      downloadHref: audit ? artifactDownloadUrl(audit.id, name) : undefined,
       hash: pointer.contentHash,
       name,
+      protected: name !== "publicReport",
+      storageUri: pointer.storageBlobId ? `walrus://${pointer.storageBlobId}` : undefined,
       uri: `walrus://${pointer.blobId}`,
     }));
   }, [audit]);
+  const preparedMoveFileCount = prepared?.sourceSummary?.moveFileCount ?? 0;
+  const preparedModuleCount = prepared?.packageSummary.moduleCount ?? 0;
   const paymentDisabledReason = !account
     ? "CONNECT_WALLET_REQUIRED"
     : !contractPackageId
@@ -212,12 +240,66 @@ export default function Home() {
       : !configObjectId
         ? "NEXT_PUBLIC_TUSKSCAN_CONFIG_ID_MISSING"
         : !prepared
-          ? "PREPARE_SCAN_REQUIRED"
-          : state === "running"
-            ? "SCAN_ALREADY_RUNNING"
-            : signAndExecute.isPending || signPersonalMessage.isPending
-              ? "WALLET_REQUEST_PENDING"
-              : "";
+          ? "LOAD_PACKAGE_REQUIRED"
+          : preparedMoveFileCount < 1
+            ? "NO_MOVE_SOURCE_FILES_PREPARED"
+            : preparedModuleCount < 1
+              ? "NO_MODULES_PREPARED"
+              : state === "running"
+                ? "SCAN_ALREADY_RUNNING"
+                : signAndExecute.isPending || signPersonalMessage.isPending
+                  ? "WALLET_REQUEST_PENDING"
+                  : "";
+  const paymentButtonBusy =
+    state === "preparing" ||
+    state === "paying" ||
+    state === "running" ||
+    signAndExecute.isPending ||
+    signPersonalMessage.isPending;
+  const visibleFindings = findings.length ? findings : emptyFindings;
+  const selectedFinding =
+    visibleFindings[Math.min(selectedFindingIndex, visibleFindings.length - 1)] ?? emptyFindings[0]!;
+  const selectedEvidence = selectedFinding.evidence[0];
+  const criticalCount = findings.filter((finding) => finding.severity.toLowerCase() === "critical").length;
+  const highCount = findings.filter((finding) => finding.severity.toLowerCase() === "high").length;
+  const mediumCount = findings.filter((finding) => finding.severity.toLowerCase() === "medium").length;
+  const lowCount = findings.filter((finding) => finding.severity.toLowerCase() === "low").length;
+  const infoCount = findings.filter((finding) => finding.severity.toLowerCase() === "info").length;
+  const memoryMatchCount = findings.filter((finding) => finding.memoryAssisted).length;
+  const agentReviewCount =
+    audit?.report?.agentReviews?.filter((review) => review.status === "completed").length ?? 0;
+  const maxSeverityCount = Math.max(criticalCount, highCount, mediumCount, lowCount, infoCount, 1);
+  const severityDistribution = [
+    { count: criticalCount, label: "critical" },
+    { count: highCount, label: "high" },
+    { count: mediumCount, label: "medium" },
+    { count: lowCount, label: "low" },
+    { count: infoCount, label: "info" },
+  ];
+  const resolvedSource =
+    prepared?.sourceSummary?.url ?? audit?.sourceUrl ?? audit?.report?.sourceSummary?.url ?? sourceUrl;
+  const scanProgress =
+    state === "complete" ? "100%" : state === "running" ? "68%" : state === "prepared" ? "24%" : "8%";
+
+  useEffect(() => {
+    debugE2E("pay-gate", {
+      account: account?.address ? shorten(account.address) : null,
+      busy: paymentButtonBusy,
+      configObjectId: configObjectId ? shorten(configObjectId) : null,
+      contractPackageId: contractPackageId ? shorten(contractPackageId) : null,
+      prepared: prepared
+        ? {
+            modules: prepared.packageSummary.moduleCount,
+            moveFiles: prepared.sourceSummary?.moveFileCount ?? 0,
+            packageId: prepared.packageSummary.packageId,
+            priceMist: prepared.priceMist,
+            snapshotHash: shorten(prepared.snapshotHash),
+          }
+        : null,
+      reason: paymentDisabledReason || "READY",
+      state,
+    });
+  }, [account?.address, paymentButtonBusy, paymentDisabledReason, prepared, state]);
 
   const appendLogs = useCallback((entries: Omit<TerminalLog, "id">[]) => {
     entries.forEach((entry, index) => {
@@ -231,7 +313,41 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    const logStream = logStreamRef.current;
+    if (!logStream) return;
+    logStream.scrollTo({ top: logStream.scrollHeight });
+  }, [terminalLogs, error]);
+
+  const scrollToSection = useCallback((sectionId: string, behavior: ScrollBehavior = "smooth") => {
+    const scroller = terminalRef.current;
+    const target = document.getElementById(sectionId);
+    if (!scroller || !target) return;
+
+    window.scrollTo(0, 0);
+    const scrollerTop = scroller.getBoundingClientRect().top;
+    const targetTop = target.getBoundingClientRect().top;
+    scroller.scrollTo({
+      behavior,
+      top: Math.max(targetTop - scrollerTop + scroller.scrollTop, 0),
+    });
+    setActiveSection(sectionId);
+  }, []);
+
+  useEffect(() => {
+    function syncHashToTerminal() {
+      const sectionId = decodeURIComponent(window.location.hash.replace(/^#/, ""));
+      if (!sectionId) return;
+      requestAnimationFrame(() => scrollToSection(sectionId, "auto"));
+    }
+
+    syncHashToTerminal();
+    window.addEventListener("hashchange", syncHashToTerminal);
+    return () => window.removeEventListener("hashchange", syncHashToTerminal);
+  }, [scrollToSection]);
+
+  useEffect(() => {
     if (account?.address && previousWallet.current !== account.address) {
+      privateReportSession.current = null;
       appendLogs([
         {
           section: "AUTH",
@@ -245,6 +361,7 @@ export default function Home() {
       ]);
     }
     if (!account?.address && previousWallet.current) {
+      privateReportSession.current = null;
       appendLogs([
         {
           section: "AUTH",
@@ -261,7 +378,7 @@ export default function Home() {
     const targetSource = (input?.sourceUrl ?? sourceUrl).trim();
 
     if (!targetPackage && !targetSource) {
-      const message = "Paste a GitHub repo URL before PREPARE.";
+      const message = "Paste a GitHub repo URL before loading a package.";
       setError(message);
       appendLogs([{ section: "SCAN", text: message, tone: "error" }]);
       return;
@@ -287,10 +404,23 @@ export default function Home() {
     ]);
 
     try {
+      debugE2E("prepare-request", {
+        network,
+        packageId: targetPackage || null,
+        sourceUrl: targetSource || null,
+      });
       const response = await postJson<PreparedAudit>("/api/audits/prepare", {
         network,
         packageId: targetPackage || undefined,
         sourceUrl: targetSource || undefined,
+      });
+      debugE2E("prepare-response", {
+        modules: response.packageSummary.moduleCount,
+        moveFiles: response.sourceSummary?.moveFileCount ?? 0,
+        packageId: response.packageSummary.packageId,
+        priceMist: response.priceMist,
+        sourceUrl: response.sourceSummary?.url,
+        snapshotHash: response.snapshotHash,
       });
       setPrepared(response);
       setAudit(null);
@@ -316,11 +446,19 @@ export default function Home() {
         },
         {
           section: "PAYMENT",
-          text: `Price quote received: ${response.priceMist} MIST. Execute PAY_AND_RUN when ready.`,
+          text: `Price quote received: ${response.priceMist} MIST. Select RUN when ready.`,
+        },
+        {
+          section: "PAYMENT",
+          text: account
+            ? "PAY_GATE: READY"
+            : "PAY_GATE: CONNECT_WALLET_REQUIRED",
+          tone: account ? "success" : "warning",
         },
       ]);
     } catch (caught) {
       const message = errorMessage(caught);
+      debugE2E("prepare-error", { message });
       setError(message);
       setState("failed");
       appendLogs([{ section: "SCAN", text: message, tone: "error" }]);
@@ -328,11 +466,27 @@ export default function Home() {
   }
 
   async function runPaidAudit() {
+    debugE2E("pay-click", {
+      busy: paymentButtonBusy,
+      reason: paymentDisabledReason || "READY",
+      state,
+    });
+    if (paymentDisabledReason) {
+      setError(paymentDisabledReason);
+      appendLogs([
+        {
+          section: "PAYMENT",
+          text: `PAY_LOCK: ${paymentDisabledReason}`,
+          tone: "warning",
+        },
+      ]);
+      return;
+    }
     if (!prepared) {
       appendLogs([
         {
           section: "PAYMENT",
-          text: "No prepared target found. Paste a GitHub repo URL or run PREPARE after staging one.",
+          text: "No loaded target found. Paste a GitHub repo URL and load the package first.",
           tone: "warning",
         },
       ]);
@@ -352,10 +506,21 @@ export default function Home() {
 
     try {
       const paidSourceUrl = (prepared.sourceSummary?.url ?? sourceUrl.trim()) || undefined;
+      debugE2E("payment-start", {
+        packageId: prepared.packageSummary.packageId,
+        priceMist: prepared.priceMist,
+        snapshotHash: prepared.snapshotHash,
+        sourceUrl: paidSourceUrl,
+      });
+      const token = await getPrivateReportSession(account.address);
       const payment = await createAuditJobPayment({
         packageId: prepared.packageSummary.packageId,
         priceMist: prepared.priceMist,
         snapshotHash: prepared.snapshotHash,
+      });
+      debugE2E("payment-result", {
+        digest: payment.digest,
+        jobObjectId: payment.jobObjectId,
       });
       setState("running");
       appendLogs([
@@ -364,7 +529,7 @@ export default function Home() {
           text: `Transaction sealed: ${shorten(payment.digest)}`,
           tone: "success",
         },
-        { section: "SCAN", text: "Audit workers online. Recalling exploit memories." },
+        { section: "AGENT", text: "Payment accepted. Agent orchestrator preparing audit job." },
         { section: "SCAN", text: "Registering paid audit with TuskScan API." },
       ]);
       const created = await postJson<{ auditId: string; status: string }>("/api/audits", {
@@ -375,8 +540,15 @@ export default function Home() {
         suiJobObjectId: payment.jobObjectId,
         suiTransactionDigest: payment.digest,
       });
+      debugE2E("audit-created", created);
+      appendLogs([
+        {
+          section: "AGENT",
+          text: `Job ${shorten(created.auditId)} queued. Waiting for audit worker.`,
+        },
+      ]);
       const job = await waitForAuditCompletion(created.auditId);
-      const token = await createPrivateReportSession(account.address);
+      appendLogs([{ section: "AGENT", text: "Report worker finished. Fetching private report." }]);
       const reportPayload = await getJsonWithAuth<ReportResponse>(
         `/api/audits/${created.auditId}/report`,
         token,
@@ -390,9 +562,11 @@ export default function Home() {
           text: `Report unlocked: risk ${reportPayload.report.riskScore}/100, ${reportPayload.report.findings.length} findings.`,
           tone: "success",
         },
+        ...agentReportLogs(reportPayload.report, job),
       ]);
     } catch (caught) {
       const message = errorMessage(caught);
+      debugE2E("pay-error", { message });
       setError(message);
       setState("failed");
       appendLogs([{ section: "PAYMENT", text: message, tone: "error" }]);
@@ -400,79 +574,100 @@ export default function Home() {
   }
 
   async function waitForAuditCompletion(auditId: string) {
-    for (let attempt = 0; attempt < 60; attempt += 1) {
+    const loggedPhases = new Set<string>();
+    for (let attempt = 0; attempt < 240; attempt += 1) {
       const job = await getJson<AuditJob>(`/api/audits/${auditId}`);
+      debugE2E("audit-poll", {
+        attempt,
+        attempts: job.attempts,
+        auditId,
+        lastError: job.lastError,
+        lockedBy: job.lockedBy,
+        lockExpiresAt: job.lockExpiresAt,
+        status: job.status,
+      });
       setAudit(job);
       if (attempt === 0 || attempt % 5 === 0) {
         appendLogs([{ section: "SCAN", text: `Audit job ${auditId} status: ${job.status}` }]);
       }
+      if (job.status === "queued" && !loggedPhases.has("queued")) {
+        loggedPhases.add("queued");
+        appendLogs([
+          {
+            section: "AGENT",
+            text: "Queue monitor active. Waiting for exclusive worker claim.",
+          },
+        ]);
+      }
+      if (job.status === "running" && !loggedPhases.has("running")) {
+        loggedPhases.add("running");
+        appendLogs([
+          {
+            section: "AGENT",
+            text: "Worker claimed job. Verifying paid package snapshot.",
+            tone: "success",
+          },
+          {
+            section: "AGENT",
+            text: "MemWal recall agent retrieving prior exploit patterns.",
+          },
+          {
+            section: "AGENT",
+            text: "Scanner agent running deterministic Move and source-aware rules.",
+          },
+          {
+            section: "AGENT",
+            text: "Researcher/exploit agents reviewing architecture and attack paths when LLM is configured.",
+          },
+          {
+            section: "AGENT",
+            text: "Critic and patch agents triaging confidence, false positives, and remediation notes.",
+          },
+        ]);
+      }
       if (job.status === "completed") return job;
       if (job.status === "failed") {
-        throw new Error("Audit processing failed after payment.");
+        throw new Error(job.lastError ?? "Audit processing failed after payment.");
       }
       await sleep(2000);
     }
     throw new Error("Audit processing is still running. Load your audits again in a moment.");
   }
 
-  async function loadWalletAudits() {
-    setError("");
-    appendLogs([{ section: "AUTH", text: "Requesting private audit index for wallet." }]);
-    if (!account) {
-      const message = "Connect a Sui wallet before loading audits.";
-      setError(message);
-      appendLogs([{ section: "AUTH", text: message, tone: "error" }]);
-      return;
-    }
-
+  async function openArtifactDownload(row: (typeof proofRows)[number]) {
+    if (!row.downloadHref) return;
+    const targetWindow = window.open("about:blank", "_blank", "noopener,noreferrer");
     try {
-      const token = await createPrivateReportSession(account.address);
-      const payload = await getJsonWithAuth<{ audits: AuditJob[] }>(
-        `/api/audits?wallet=${encodeURIComponent(account.address)}`,
-        token,
-      );
-      setWalletAudits(payload.audits);
+      const token = row.protected && account
+        ? await getPrivateReportSession(account.address)
+        : undefined;
+      const response = await fetch(row.downloadHref, {
+        headers: token ? { authorization: `Bearer ${token}` } : undefined,
+      });
+      if (!response.ok) {
+        throw new Error(`Artifact download returned HTTP ${response.status}: ${await readErrorBody(response)}`);
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      if (targetWindow) {
+        targetWindow.location.href = objectUrl;
+      } else {
+        window.open(objectUrl, "_blank", "noopener,noreferrer");
+      }
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
       appendLogs([
         {
           section: "REPORT",
-          text: `${payload.audits.length} wallet audit record(s) loaded.`,
+          text: `Opened readable artifact: ${row.name}`,
           tone: "success",
         },
       ]);
-      if (payload.audits[0]) {
-        await loadAuditReport(payload.audits[0], token);
-      }
     } catch (caught) {
+      targetWindow?.close();
       const message = errorMessage(caught);
       setError(message);
       appendLogs([{ section: "REPORT", text: message, tone: "error" }]);
     }
-  }
-
-  async function loadAuditReport(job: AuditJob, token?: string) {
-    if (!account && !token) {
-      const message = "Connect a Sui wallet before loading a private report.";
-      setError(message);
-      appendLogs([{ section: "AUTH", text: message, tone: "error" }]);
-      return;
-    }
-    const sessionToken = token ?? (await createPrivateReportSession(account!.address));
-    const reportPayload = await getJsonWithAuth<ReportResponse>(
-      `/api/audits/${job.id}/report`,
-      sessionToken,
-    );
-    setAudit({ ...job, report: reportPayload.report });
-    setPackageId(job.packageId ?? packageId);
-    setSourceUrl(job.sourceUrl ?? job.report?.sourceSummary?.url ?? sourceUrl);
-    setPrivateReport(reportPayload.private);
-    setState("complete");
-    appendLogs([
-      {
-        section: "REPORT",
-        text: `Loaded report ${shorten(job.id)} with ${reportPayload.report.findings.length} finding(s).`,
-        tone: "success",
-      },
-    ]);
   }
 
   function handleCommandSubmit(event: FormEvent<HTMLFormElement>) {
@@ -507,124 +702,138 @@ export default function Home() {
     });
   }
 
-  function fillDemo() {
-    setPackageId("");
-    setSourceUrl(samplePackage);
-    setCommand(samplePackage);
-    appendLogs([
-      {
-        section: "SYSTEM",
-        text: `Demo repo loaded. Submit command or run PREPARE: ${samplePackage}`,
-      },
-    ]);
+  function handleSectionNav(event: MouseEvent<HTMLAnchorElement>, sectionId: string) {
+    event.preventDefault();
+    if (window.location.hash !== `#${sectionId}`) {
+      window.history.pushState(null, "", `#${sectionId}`);
+    }
+    scrollToSection(sectionId);
+  }
+
+  function navClass(sectionId: string) {
+    return activeSection === sectionId ? styles.navActive : undefined;
   }
 
   return (
     <main className={styles.shell}>
       <div className={styles.crtOverlay} />
+      <aside className={styles.sidebar} aria-label="TuskScan navigation">
+        <div className={styles.sidebarBrand}>
+          <span className={styles.logoMark}>TS</span>
+          <div>
+            <strong>&gt; {bannerText}</strong>
+            <span>Move audit workbench</span>
+          </div>
+        </div>
+        <nav className={styles.navList} aria-label="Scanner sections">
+          <a className={navClass("scan")} href="#scan" onClick={(event) => handleSectionNav(event, "scan")}>Dashboard</a>
+          <a className={navClass("findings")} href="#findings" onClick={(event) => handleSectionNav(event, "findings")}>Findings</a>
+          <a className={navClass("proof")} href="#proof" onClick={(event) => handleSectionNav(event, "proof")}>Walrus / Sui proof</a>
+          <a className={navClass("memwal")} href="#memwal" onClick={(event) => handleSectionNav(event, "memwal")}>MemWal</a>
+          <a className={navClass("activity")} href="#activity" onClick={(event) => handleSectionNav(event, "activity")}>Agent session</a>
+        </nav>
+        <div className={styles.sidebarFooter}>
+          <span>[PROJECT]</span>
+          <strong>Sui {network} package</strong>
+          <small>{account ? `[connected] ${shorten(account.address)}` : "[wallet disconnected]"}</small>
+        </div>
+      </aside>
       <header className={styles.topBar}>
         <div>
-          <span className={styles.brand}>TUSKSCAN // AI VULNERABILITY CORE</span>
-          <span className={styles.topStatus}>SYSTEM STATUS: {stateLabel(state).toUpperCase()}</span>
+          <span className={styles.brand}>&gt; TUSKSCAN</span>
+          <span className={styles.topStatus}>
+            [PROJECT: SUI_MOVE] [STATUS: {stateLabel(state).toUpperCase()}]
+          </span>
         </div>
         <div className={styles.walletBox}>
-          <ConnectButton connectText="CONNECT_WALLET" />
+          <ConnectButton connectText="Connect wallet" />
         </div>
       </header>
 
       <section className={styles.terminal} ref={terminalRef}>
-        <section className={styles.bootPanel} aria-label="TuskScan terminal">
+        <section className={styles.bootPanel} id="scan" aria-label="TuskScan command center">
           <div className={styles.arcadeMasthead}>
             <div className={styles.brandPlate}>
-              <h1 className={styles.banner}>{bannerText}</h1>
+              <h1 className={styles.banner}>{bannerText} Workbench</h1>
             </div>
           </div>
 
-          <div className={styles.cockpitGrid}>
-            <section className={styles.miniPanel}>
-              <h2>SYSTEM STATUS</h2>
-              <p>- SYSTEM: {stateLabel(state).toUpperCase()}</p>
-              <p>- ENGINE: READY</p>
-              <p>- MODE  : SCAN</p>
-            </section>
-            <section className={styles.miniPanel}>
-              <h2>WALLET</h2>
-              <p>- STATUS: {account ? "CONNECTED" : "DISCONNECTED"}</p>
-              <p>- ADDR  : {walletLabel}</p>
-              <p>- NET   : SUI_{network.toUpperCase()}</p>
-            </section>
-          </div>
-
-          <div className={styles.consolePanel}>
-            <h2>CONSOLE OUTPUT</h2>
-            <div className={styles.logStream} aria-live="polite">
-            {terminalLogs.map((line) => (
-              <p className={toneClass(line.tone, styles)} key={line.id}>
-                <span>[{line.section}]</span> &gt; {line.text}
-              </p>
-            ))}
-            {error ? (
-              <p className={styles.errorLine}>
-                <span>[ERROR]</span> &gt; {error}
-              </p>
-            ) : null}
+          <div className={styles.commandStack}>
+            <div className={styles.cockpitGrid}>
+              <section className={styles.miniPanel}>
+                <h2>SCAN CONTROL</h2>
+                <p>State: {stateLabel(state)}</p>
+                <p>Progress: {scanProgress}</p>
+                <p>Agentic engine: armed</p>
+              </section>
+              <section className={styles.miniPanel}>
+                <h2>CHAIN SESSION</h2>
+                <p>Status: {account ? "Connected" : "Disconnected"}</p>
+                <p>Address: {walletLabel}</p>
+                <p>Network: Sui {network}</p>
+              </section>
             </div>
+
+            <form className={styles.promptForm} onSubmit={handleCommandSubmit}>
+              <label htmlFor="scan-command">Source / package target</label>
+              <div className={styles.commandInputRow}>
+                <input
+                  autoComplete="off"
+                  id="scan-command"
+                  onChange={(event) => setCommand(event.target.value)}
+                  placeholder="github.com/org/repo/tree/main/move/package"
+                  spellCheck={false}
+                  value={command}
+                />
+                <button disabled={state === "preparing"} type="submit">[load package]</button>
+                <button
+                  className={styles.runButton}
+                  disabled={paymentButtonBusy}
+                  onClick={runPaidAudit}
+                  title={paymentDisabledReason || "Pay and run audit"}
+                  type="button"
+                >
+                  [run agentic audit]
+                </button>
+              </div>
+              <span aria-hidden="true" className={styles.cursor} />
+              <span className={styles.actionHint}>
+                {paymentDisabledReason ? `RUN_LOCK: ${paymentDisabledReason}` : prepared ? "RUN_GATE: READY" : ""}
+              </span>
+            </form>
+            <p className={styles.hint}>
+              {resolvedSource
+                ? `Staged source: ${resolvedSource}`
+                : "Paste a GitHub repo URL; TuskScan scopes the scan to Move smart-contract packages."}
+            </p>
           </div>
 
-          <form className={styles.promptForm} onSubmit={handleCommandSubmit}>
-            <label htmlFor="scan-command">tuskscan (~/scan) $</label>
-            <input
-              autoComplete="off"
-              id="scan-command"
-              onChange={(event) => setCommand(event.target.value)}
-              placeholder="github.com/org/repo/tree/main/move/package"
-              spellCheck={false}
-              value={command}
-            />
-            <span aria-hidden="true" className={styles.cursor} />
-            <button type="submit">EXEC</button>
-          </form>
-          <p className={styles.hint}>
-            paste a GitHub repo URL; TuskScan scopes the scan to Move smart-contract packages
-          </p>
-
-          <div className={styles.actions}>
-            <button disabled={state === "preparing"} onClick={() => void preparePackage()} type="button">
-              [ PREPARE ]
-            </button>
-            <button
-              disabled={Boolean(paymentDisabledReason)}
-              onClick={runPaidAudit}
-              title={paymentDisabledReason || "Pay and run audit"}
-              type="button"
-            >
-              [ PAY_AND_RUN ]
-            </button>
-            <button
-              disabled={!account || signPersonalMessage.isPending}
-              onClick={loadWalletAudits}
-              type="button"
-            >
-              [ LOAD_MY_AUDITS ]
-            </button>
-            <button onClick={fillDemo} type="button">
-              [ FILL_DEMO ]
-            </button>
-            {paymentDisabledReason ? (
-              <span className={styles.actionHint}>PAY_LOCK: {paymentDisabledReason}</span>
-            ) : null}
+          <div className={styles.consolePanel} id="activity">
+            <h2>AGENT SESSION LOG</h2>
+            <div className={styles.logStream} ref={logStreamRef} aria-live="polite">
+              {terminalLogs.map((line) => (
+                <p className={toneClass(line.tone, styles)} key={line.id}>
+                  <span>[{line.section}]</span> &gt; {line.text}
+                </p>
+              ))}
+              {error ? (
+                <p className={styles.errorLine}>
+                  <span>[ERROR]</span> &gt; {error}
+                </p>
+              ) : null}
+            </div>
           </div>
         </section>
 
-        {prepared || audit ? (
+        {state ? (
           <>
             <section className={styles.statusPanel}>
               <div className={styles.metricLine}>
-                <span>MODULES</span>
+                <span>MOVE_MODULES</span>
                 <strong>{prepared?.packageSummary.moduleCount ?? "--"}</strong>
               </div>
               <div className={styles.metricLine}>
-                <span>FUNCTIONS</span>
+                <span>ENTRY_FUNCTIONS</span>
                 <strong>{prepared?.packageSummary.functionCount ?? "--"}</strong>
               </div>
               <div className={styles.metricLine}>
@@ -636,14 +845,84 @@ export default function Home() {
                 </strong>
               </div>
               <div className={styles.metricLine}>
-                <span>RISK</span>
+                <span>RISK_SCORE</span>
                 <strong>{audit ? `${riskScore}/100` : "--"}</strong>
               </div>
             </section>
 
+            <section className={styles.workbenchGrid} aria-label="Audit workbench status">
+              <section className={styles.terminalPanel}>
+                <div className={styles.panelHeader}>
+                  <h2>[ SEVERITY_DISTRIBUTION ]</h2>
+                  <span>{findings.length} findings</span>
+                </div>
+                <div className={styles.barList}>
+                  {severityDistribution.map((item) => (
+                    <div className={styles.barRow} key={item.label}>
+                      <span className={severityClass(item.label, styles)}>{item.label}</span>
+                      <div className={styles.barTrack}>
+                        <span style={{ width: `${Math.max((item.count / maxSeverityCount) * 100, item.count ? 8 : 0)}%` }} />
+                      </div>
+                      <strong>{item.count}</strong>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className={styles.terminalPanel} id="memwal">
+                <div className={styles.panelHeader}>
+                  <h2>[ MEMWAL_CALIBRATION ]</h2>
+                  <span>{memoryMatchCount} matches</span>
+                </div>
+                <dl className={styles.systemList}>
+                  <div>
+                    <dt>memory_playbooks</dt>
+                    <dd>{audit?.report?.memoryPlaybooks?.length ?? 0}</dd>
+                  </div>
+                  <div>
+                    <dt>calibrated_findings</dt>
+                    <dd>{memoryMatchCount}/{findings.length || 0}</dd>
+                  </div>
+                  <div>
+                    <dt>agent_reviews</dt>
+                    <dd>{agentReviewCount} completed</dd>
+                  </div>
+                  <div>
+                    <dt>calibration_note</dt>
+                    <dd>{audit?.report?.calibration?.note ?? "waiting for completed audit report"}</dd>
+                  </div>
+                </dl>
+              </section>
+
+              <section className={styles.terminalPanel}>
+                <div className={styles.panelHeader}>
+                  <h2>[ PROOF_INVENTORY ]</h2>
+                  <span>{proofRows.length} artifacts</span>
+                </div>
+                <dl className={styles.systemList}>
+                  <div>
+                    <dt>snapshot_hash</dt>
+                    <dd>{prepared?.snapshotHash ? shorten(prepared.snapshotHash) : "pending prepare"}</dd>
+                  </div>
+                  <div>
+                    <dt>walrus_blobs</dt>
+                    <dd>{proofRows.length}</dd>
+                  </div>
+                  <div>
+                    <dt>sui_job_object</dt>
+                    <dd>{audit?.suiJobObjectId ? shorten(audit.suiJobObjectId) : "pending payment"}</dd>
+                  </div>
+                  <div>
+                    <dt>finalized_digest</dt>
+                    <dd>{audit?.finalizedDigest ? shorten(audit.finalizedDigest) : "not finalized"}</dd>
+                  </div>
+                </dl>
+              </section>
+            </section>
+
             <section className={styles.panelGrid}>
               <section className={styles.terminalPanel}>
-                <h2>[ SCAN_TIMELINE ]</h2>
+                <h2>[ AGENTIC_SCAN_PIPELINE ]</h2>
                 <ol className={styles.timeline}>
                   {timeline(state).map((item) => (
                     <li className={item.done ? styles.done : ""} key={item.label}>
@@ -654,21 +933,72 @@ export default function Home() {
                 </ol>
               </section>
 
-              <section className={styles.terminalPanel}>
-                <h2>[ WALRUS_SUI_PROOF ]</h2>
+              <section className={styles.terminalPanel} id="proof">
+                <h2>[ WALRUS_STORAGE / SUI_PROOF ]</h2>
                 <dl className={styles.proofList}>
                   <div>
                     <dt>SUI_REPORT_JOB</dt>
-                    <dd>{audit?.suiJobObjectId ?? `pending ${network} payment`}</dd>
+                    <dd>
+                      {audit?.suiJobObjectId ? (
+                        <a
+                          href={suiObjectUrl(audit.suiJobObjectId)}
+                          rel="noreferrer"
+                          target="_blank"
+                          title="Open Sui report job object"
+                        >
+                          {audit.suiJobObjectId}
+                        </a>
+                      ) : (
+                        `pending ${network} payment`
+                      )}
+                    </dd>
                   </div>
                   <div>
                     <dt>TRANSACTION</dt>
-                    <dd>{audit?.suiTransactionDigest ?? "pending"}</dd>
+                    <dd>
+                      {audit?.suiTransactionDigest ? (
+                        <a
+                          href={suiTransactionUrl(audit.suiTransactionDigest)}
+                          rel="noreferrer"
+                          target="_blank"
+                          title="Open Sui transaction"
+                        >
+                          {audit.suiTransactionDigest}
+                        </a>
+                      ) : (
+                        "pending"
+                      )}
+                    </dd>
                   </div>
                   {proofRows.slice(0, 4).map((row) => (
                     <div key={row.name}>
                       <dt>{row.name.toUpperCase()}</dt>
-                      <dd>{row.uri}</dd>
+                      <dd>
+                        {row.downloadHref && !row.protected ? (
+                          <a
+                            href={row.downloadHref}
+                            rel="noreferrer"
+                            target="_blank"
+                            title={`Open readable ${row.name}`}
+                          >
+                            {row.uri}
+                          </a>
+                        ) : row.downloadHref ? (
+                          <button
+                            className={styles.proofLink}
+                            onClick={() => void openArtifactDownload(row)}
+                            title={`Open readable ${row.name}`}
+                            type="button"
+                          >
+                            {row.uri}
+                          </button>
+                        ) : (
+                          <span>{row.uri}</span>
+                        )}
+                        {row.storageUri && row.storageUri !== row.uri ? (
+                          <small>stored in {row.storageUri}</small>
+                        ) : null}
+                      </dd>
                     </div>
                   ))}
                 </dl>
@@ -677,51 +1007,34 @@ export default function Home() {
           </>
         ) : null}
 
-        {walletAudits.length ? (
-          <section className={styles.terminalPanel}>
-            <h2>[ COMMAND_HISTORY ]</h2>
-            <div className={styles.history}>
-              {walletAudits.slice(0, 5).map((item) => (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    void loadAuditReport(item);
-                  }}
-                  type="button"
-                >
-                  <span>{item.status}</span>
-                  <strong>{item.packageId ?? item.id}</strong>
-                </button>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
-        {audit ? (
-        <section className={styles.terminalPanel}>
+        {state ? (
+        <section className={styles.terminalPanel} id="findings">
           <div className={styles.panelHeader}>
-            <h2>[ REPORT_OUTPUT ]</h2>
+            <h2>[ FINDINGS / REPORT_OUTPUT ]</h2>
             <span>{privateReport ? "PRIVATE_REPORT_UNLOCKED" : "PUBLIC_SUMMARY"}</span>
           </div>
 
           {audit?.report ? (
             <div className={styles.reportSummary}>
               <div>
-                <span>TOP_RISKS</span>
+                  <span>TOP_RISKS</span>
+                <p className={styles.severityDigest}>
+                  {criticalCount} critical / {highCount} high findings
+                </p>
                 <ul>
                   {(audit.report.topRisks?.length
                     ? audit.report.topRisks
                     : ["No critical or high severity risks detected."]
-                  ).map((item) => (
-                    <li key={item}>{item}</li>
+                  ).map((item, index) => (
+                    <li key={listItemKey("risk", item, index)}>{item}</li>
                   ))}
                 </ul>
               </div>
               <div>
                 <span>ACTION_PLAN</span>
                 <ol>
-                  {(audit.report.actionPlan ?? []).slice(0, 4).map((item) => (
-                    <li key={item}>{item}</li>
+                  {(audit.report.actionPlan ?? []).slice(0, 4).map((item, index) => (
+                    <li key={listItemKey("action", item, index)}>{item}</li>
                   ))}
                 </ol>
               </div>
@@ -771,7 +1084,8 @@ export default function Home() {
                   {" "}completed stages
                 </p>
                 <small>
-                  {audit.report.calibration?.memoryMatchedFindings ?? 0} MemWal matched findings
+                  {audit.report.calibration?.memoriesRecalled ?? 0} recalled /{" "}
+                  {audit.report.calibration?.memoryMatchedFindings ?? 0} matched
                 </small>
               </div>
               <div>
@@ -791,8 +1105,13 @@ export default function Home() {
               <span>EVIDENCE</span>
               <span>MEMORY</span>
             </div>
-            {(findings.length ? findings : emptyFindings).map((finding) => (
-              <div className={styles.tableRow} key={`${finding.ruleId}-${finding.title}`}>
+            {visibleFindings.map((finding, index) => (
+              <button
+                className={`${styles.tableRow} ${index === selectedFindingIndex ? styles.tableRowActive : ""}`}
+                key={findingKey(finding, index)}
+                onClick={() => setSelectedFindingIndex(index)}
+                type="button"
+              >
                 <span className={severityClass(finding.severity, styles)}>
                   {finding.severity}
                 </span>
@@ -814,9 +1133,40 @@ export default function Home() {
                     <small>Calibrated: {finding.calibratedConfidence}</small>
                   ) : null}
                 </span>
-              </div>
+              </button>
             ))}
           </div>
+
+          <aside className={styles.findingDetail} aria-label="Selected finding detail">
+            <div className={styles.panelHeader}>
+              <h2>Resolve insight</h2>
+              <span className={severityClass(selectedFinding.severity, styles)}>
+                {selectedFinding.severity}
+              </span>
+            </div>
+            <div className={styles.detailStack}>
+              <div>
+                <span>Finding</span>
+                <strong>{selectedFinding.title}</strong>
+                <p>{selectedFinding.description ?? selectedFinding.recommendation}</p>
+              </div>
+              <div>
+                <span>Evidence</span>
+                <p>{formatEvidence(selectedEvidence)}</p>
+                {selectedEvidence?.codeSnippet ? (
+                  <pre className={styles.codeBlock}>{selectedEvidence.codeSnippet}</pre>
+                ) : null}
+              </div>
+              <div>
+                <span>Recommended action</span>
+                <p>{selectedFinding.patchSuggestion ?? selectedFinding.recommendation}</p>
+              </div>
+              <div>
+                <span>Confidence</span>
+                <p>{selectedFinding.calibratedConfidence ?? selectedFinding.confidence}</p>
+              </div>
+            </div>
+          </aside>
         </section>
         ) : null}
       </section>
@@ -838,10 +1188,18 @@ export default function Home() {
       throw new Error("Connect a Sui wallet before paying.");
     }
 
+    debugE2E("payment-config-check", {
+      configObjectId: shorten(configObjectId),
+      expectedPriceMist: input.priceMist,
+    });
     await assertLivePaymentConfig({
       configObjectId,
       expectedPriceMist: input.priceMist,
       suiClient,
+    });
+    debugE2E("payment-config-ok", {
+      configObjectId: shorten(configObjectId),
+      expectedPriceMist: input.priceMist,
     });
 
     const tx = new Transaction();
@@ -857,24 +1215,44 @@ export default function Home() {
       target: `${contractPackageId}::audit::create_audit_job`,
     });
 
+    debugE2E("wallet-sign-request", {
+      chain: `sui:${network}`,
+      packageId: input.packageId,
+      priceMist: input.priceMist,
+      target: `${shorten(contractPackageId)}::audit::create_audit_job`,
+    });
     const result = await signAndExecute.mutateAsync({
       chain: `sui:${network}`,
       transaction: tx,
     });
+    debugE2E("wallet-sign-result", { digest: result.digest });
     const finalized = await suiClient.waitForTransaction({
       digest: result.digest,
       options: { showObjectChanges: true },
+    });
+    debugE2E("wallet-finalized", {
+      digest: result.digest,
+      objectChangeTypes: finalized.objectChanges?.map((change) => change.type) ?? [],
     });
     const createdJob = finalized.objectChanges?.find(
       (change) =>
         change.type === "created" &&
         "objectType" in change &&
-        change.objectType === `${contractPackageId}::audit::AuditJob`,
+        isMoveType(change.objectType, contractPackageId, "audit", "AuditJob"),
     );
 
     if (!createdJob || !("objectId" in createdJob)) {
+      debugE2E("wallet-finalized-no-job", {
+        digest: result.digest,
+        objectChanges: finalized.objectChanges,
+      });
       throw new Error("Payment succeeded, but no AuditJob object was found in object changes.");
     }
+    debugE2E("wallet-created-job", {
+      objectId: createdJob.objectId,
+      objectType: "objectType" in createdJob ? createdJob.objectType : null,
+      owner: "owner" in createdJob ? createdJob.owner : null,
+    });
 
     return {
       digest: result.digest,
@@ -896,6 +1274,12 @@ export default function Home() {
       content && "fields" in content ? (content.fields as Record<string, unknown>) : null;
     const operator = typeof fields?.operator === "string" ? fields.operator : "";
     const priceMist = String(fields?.price_mist ?? "");
+    debugE2E("live-payment-config", {
+      configObjectId: shorten(input.configObjectId),
+      expectedPriceMist: input.expectedPriceMist,
+      operator: operator ? shorten(operator) : null,
+      priceMist,
+    });
 
     if (!operator || isZeroAddress(operator)) {
       throw new Error("Payment halted: onchain AuditConfig operator is the zero address.");
@@ -905,6 +1289,31 @@ export default function Home() {
         `Payment halted: stale price quote. Chain expects ${priceMist} MIST, app prepared ${input.expectedPriceMist} MIST. Prepare again after restarting the API.`,
       );
     }
+  }
+
+  async function getPrivateReportSession(address: string) {
+    const normalizedAddress = address.toLowerCase();
+    if (privateReportSession.current?.address === normalizedAddress) {
+      debugE2E("auth-session-cache-hit", { address: shorten(address) });
+      return privateReportSession.current.token;
+    }
+
+    appendLogs([
+      {
+        section: "AUTH",
+        text: "Requesting one wallet signature for private report access.",
+      },
+    ]);
+    const token = await createPrivateReportSession(address);
+    privateReportSession.current = { address: normalizedAddress, token };
+    appendLogs([
+      {
+        section: "AUTH",
+        text: "Private report session unlocked for this wallet.",
+        tone: "success",
+      },
+    ]);
+    return token;
   }
 
   async function createPrivateReportSession(address: string) {
@@ -993,6 +1402,53 @@ function timeline(state: AuditState) {
   ].map((label, index) => ({ done: index < completed, label, step: index + 1 }));
 }
 
+function isMoveType(
+  value: unknown,
+  packageId: string,
+  moduleName: string,
+  typeName: string,
+) {
+  return (
+    typeof value === "string" &&
+    (value === `${packageId}::${moduleName}::${typeName}` ||
+      value.endsWith(`::${moduleName}::${typeName}`))
+  );
+}
+
+function findingKey(finding: AuditReport["findings"][number], index: number) {
+  const evidence = finding.evidence[0];
+  return [
+    "finding",
+    index,
+    finding.ruleId,
+    finding.title,
+    evidence?.moduleName,
+    evidence?.functionName,
+    evidence?.filePath,
+    evidence?.lineStart,
+    evidence?.lineEnd,
+  ]
+    .filter((value) => value !== undefined && value !== "")
+    .map(String)
+    .join(":");
+}
+
+function listItemKey(scope: string, item: string, index: number) {
+  return `${scope}:${index}:${item}`;
+}
+
+function suiObjectUrl(objectId: string) {
+  return `${suiExplorerBase}/object/${encodeURIComponent(objectId)}`;
+}
+
+function suiTransactionUrl(digest: string) {
+  return `${suiExplorerBase}/txblock/${encodeURIComponent(digest)}`;
+}
+
+function artifactDownloadUrl(auditId: string, artifactName: string) {
+  return `${apiBase}/api/audits/${encodeURIComponent(auditId)}/artifacts/${encodeURIComponent(artifactName)}`;
+}
+
 function formatEvidence(evidence: AuditReport["findings"][number]["evidence"][number] | undefined) {
   if (!evidence) return "Run an audit to load evidence.";
   const location = evidence.filePath
@@ -1015,6 +1471,52 @@ function toneClass(tone: TerminalLog["tone"], stylesObject: Record<string, strin
   return stylesObject.logLine;
 }
 
+function agentReportLogs(report: AuditReport, job: AuditJob): Omit<TerminalLog, "id">[] {
+  const logs: Omit<TerminalLog, "id">[] = [];
+  const memoryMatches = report.calibration?.memoryMatchedFindings ?? 0;
+  const memoriesRecalled = report.calibration?.memoriesRecalled ?? 0;
+  const playbookCount = report.memoryPlaybooks?.length ?? 0;
+  logs.push({
+    section: "AGENT",
+    text: `MemWal calibration complete: ${memoriesRecalled} recalled memories, ${memoryMatches} matched findings, ${playbookCount} reusable playbooks.`,
+    tone: memoryMatches > 0 ? "success" : "normal",
+  });
+
+  for (const review of report.agentReviews ?? []) {
+    const status = review.status === "completed" ? "completed" : "not configured";
+    const output = review.output[0] ? ` ${review.output[0]}` : "";
+    logs.push({
+      section: "AGENT",
+      text: `${formatAgentName(review.agent)} ${status}; reviewed ${review.findingsReviewed} findings.${output}`,
+      tone: review.status === "completed" ? "success" : "warning",
+    });
+  }
+
+  if (report.generatedExploitTests?.length || report.sandboxTestRun) {
+    logs.push({
+      section: "AGENT",
+      text: `Patch/test agent drafted ${report.generatedExploitTests?.length ?? 0} exploit tests; sandbox status ${report.sandboxTestRun?.status ?? "disabled"}.`,
+      tone: report.sandboxTestRun?.status === "completed" ? "success" : "normal",
+    });
+  }
+
+  const artifactCount = Object.keys(report.artifacts ?? {}).length;
+  logs.push({
+    section: "AGENT",
+    text: `Walrus writer stored ${artifactCount} report artifacts; ${job.finalizedDigest ? `Sui proof finalized ${shorten(job.finalizedDigest)}.` : "Sui proof finalization pending."}`,
+    tone: job.finalizedDigest ? "success" : "warning",
+  });
+
+  return logs;
+}
+
+function formatAgentName(agent: string) {
+  return agent
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function shorten(value: string) {
   if (value.length <= 18) return value;
   return `${value.slice(0, 8)}...${value.slice(-6)}`;
@@ -1028,19 +1530,50 @@ function isZeroAddress(value: string) {
   }
 }
 
+function debugE2E(event: string, payload?: unknown) {
+  if (typeof window === "undefined") return;
+  console.info(`[TuskScan:E2E] ${event}`, payload ?? {});
+}
+
+function sanitizeApiBody(body: unknown) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return body;
+  const sanitized = { ...(body as Record<string, unknown>) };
+  if ("signature" in sanitized) sanitized.signature = "[redacted]";
+  if ("message" in sanitized && typeof sanitized.message === "string") {
+    sanitized.message = "[redacted]";
+  }
+  return sanitized;
+}
+
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   let response: Response;
   try {
+    debugE2E("api-request", {
+      body: sanitizeApiBody(body),
+      method: "POST",
+      path,
+    });
     response = await fetch(`${apiBase}${path}`, {
       body: JSON.stringify(body),
       headers: { "content-type": "application/json" },
       method: "POST",
     });
   } catch (error) {
+    debugE2E("api-network-error", {
+      error: errorMessage(error),
+      method: "POST",
+      path,
+    });
     throw new Error(
       `API request failed for ${path}: ${errorMessage(error)} Check that TuskScan API is running at ${apiBase}.`,
     );
   }
+  debugE2E("api-response", {
+    method: "POST",
+    ok: response.ok,
+    path,
+    status: response.status,
+  });
   if (!response.ok) {
     throw new Error(`API ${path} returned HTTP ${response.status}: ${await readErrorBody(response)}`);
   }
@@ -1048,7 +1581,14 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function getJson<T>(path: string): Promise<T> {
+  debugE2E("api-request", { method: "GET", path });
   const response = await fetch(`${apiBase}${path}`);
+  debugE2E("api-response", {
+    method: "GET",
+    ok: response.ok,
+    path,
+    status: response.status,
+  });
   if (!response.ok) {
     throw new Error(`API ${path} returned HTTP ${response.status}: ${await readErrorBody(response)}`);
   }
@@ -1056,8 +1596,15 @@ async function getJson<T>(path: string): Promise<T> {
 }
 
 async function getJsonWithAuth<T>(path: string, token: string): Promise<T> {
+  debugE2E("api-request", { auth: "bearer:[redacted]", method: "GET", path });
   const response = await fetch(`${apiBase}${path}`, {
     headers: { authorization: `Bearer ${token}` },
+  });
+  debugE2E("api-response", {
+    method: "GET",
+    ok: response.ok,
+    path,
+    status: response.status,
   });
   if (!response.ok) {
     throw new Error(`API ${path} returned HTTP ${response.status}: ${await readErrorBody(response)}`);

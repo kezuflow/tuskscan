@@ -1,6 +1,6 @@
 .shell {
   display: grid;
-  grid-template-rows: 48px 42px minmax(0, 1fr);
+  grid-template-rows: 50px minmax(0, 1fr);
   height: 100svh;
   max-height: 100svh;
   min-height: 100svh;
@@ -18,7 +18,7 @@
 
 .sidebar {
   display: grid;
-  grid-row: 2;
+  grid-row: 1;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 16px;
@@ -28,8 +28,7 @@
   padding: 0 18px;
 }
 
-.sidebarBrand,
-.topBar > div {
+.sidebarBrand {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -107,8 +106,17 @@
 
 .sidebarFooter {
   display: grid;
+  grid-template-columns: auto auto;
   justify-items: end;
-  min-width: 180px;
+  align-items: center;
+  column-gap: 10px;
+  min-width: 208px;
+}
+
+.sidebarFooter span,
+.sidebarFooter strong,
+.sidebarFooter small {
+  grid-column: 1;
 }
 
 .sidebarFooter strong {
@@ -119,35 +127,11 @@
   white-space: nowrap;
 }
 
-.topBar {
-  display: flex;
-  grid-row: 1;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  min-width: 0;
-  border-bottom: 1px solid #2b2a26;
-  background: #171613;
-  padding: 0 18px;
-}
-
-.brand {
-  color: #7fca60;
-  font-size: 15px;
-  font-weight: 800;
-  line-height: 1;
-}
-
-.topStatus {
-  color: #76a8e8;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
-}
-
 .walletBox {
   display: flex;
   justify-content: flex-end;
+  grid-column: 2;
+  grid-row: 1 / span 3;
   min-width: fit-content;
 }
 
@@ -165,7 +149,7 @@
 
 .terminal {
   display: grid;
-  grid-row: 3;
+  grid-row: 2;
   grid-auto-rows: max-content;
   align-content: start;
   gap: 0;
@@ -871,7 +855,7 @@
 
 @media (max-width: 1100px) {
   .shell {
-    grid-template-rows: auto auto minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .sidebar {
@@ -885,8 +869,13 @@
   }
 
   .sidebarFooter {
+    grid-template-columns: auto minmax(0, 1fr);
     justify-items: start;
     min-width: 0;
+  }
+
+  .walletBox {
+    justify-content: end;
   }
 
   .bootPanel {
@@ -934,17 +923,17 @@
 }
 
 @media (max-width: 760px) {
-  .topBar {
-    display: grid;
-    padding: 12px 14px;
+  .sidebarFooter {
+    grid-template-columns: 1fr;
+    row-gap: 6px;
   }
 
-  .topBar > div {
-    display: grid;
-    gap: 5px;
-  }
-
+  .sidebarFooter span,
+  .sidebarFooter strong,
+  .sidebarFooter small,
   .walletBox {
+    grid-column: 1;
+    grid-row: auto;
     justify-content: start;
   }
 

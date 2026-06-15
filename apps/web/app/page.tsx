@@ -738,20 +738,12 @@ export default function Home() {
         <div className={styles.sidebarFooter}>
           <span>[PROJECT]</span>
           <strong>Sui {network} package</strong>
-          <small>{account ? `[connected] ${shorten(account.address)}` : "[wallet disconnected]"}</small>
+          <small>{account ? "[connected]" : "[wallet disconnected]"}</small>
+          <div className={styles.walletBox}>
+            <ConnectButton connectText="Connect wallet" />
+          </div>
         </div>
       </aside>
-      <header className={styles.topBar}>
-        <div>
-          <span className={styles.brand}>&gt; TUSKSCAN</span>
-          <span className={styles.topStatus}>
-            [PROJECT: SUI_MOVE] [STATUS: {stateLabel(state).toUpperCase()}]
-          </span>
-        </div>
-        <div className={styles.walletBox}>
-          <ConnectButton connectText="Connect wallet" />
-        </div>
-      </header>
 
       <section className={styles.terminal} ref={terminalRef}>
         <section className={styles.bootPanel} id="scan" aria-label="TuskScan command center">

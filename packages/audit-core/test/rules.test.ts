@@ -3,9 +3,11 @@ import test from "node:test";
 
 import {
   calculateRiskScore,
+  extractMemoryWriteBundle,
   runAuditWorkflow,
   runDeterministicAudit,
 } from "../src/index.ts";
+import type { ExploitMemory } from "../src/index.ts";
 import type { SourceContext } from "@repo/shared";
 import {
   demoPackageASnapshot,
@@ -194,6 +196,40 @@ test("demo package B can be marked memory-assisted after package A teaches a les
   );
 
   assert.equal(packageALessons.length > 0, true);
+  assert.equal(
+    packageBFindings.some((finding) => finding.memoryAssisted),
+    true,
+  );
+});
+
+test("production-shaped memory records match repeated demo package scans", () => {
+  const packageAFindings = runDeterministicAudit(demoPackageASnapshot);
+  const memoryWrite = extractMemoryWriteBundle(packageAFindings, demoPackageASnapshot);
+  const productionMemories: ExploitMemory[] = [
+    ...memoryWrite.patterns,
+    ...memoryWrite.observations,
+  ].map((memory, index) => {
+    const summary = JSON.stringify(memory);
+    return {
+      id: `memwal-${index}`,
+      query: summary,
+      summary,
+    };
+  });
+
+  const repeatedPackageAFindings = runDeterministicAudit(
+    demoPackageASnapshot,
+    productionMemories,
+  );
+  const packageBFindings = runDeterministicAudit(
+    demoPackageBSnapshot,
+    productionMemories,
+  );
+
+  assert.equal(
+    repeatedPackageAFindings.some((finding) => finding.memoryAssisted),
+    true,
+  );
   assert.equal(
     packageBFindings.some((finding) => finding.memoryAssisted),
     true,

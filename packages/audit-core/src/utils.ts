@@ -27,12 +27,35 @@ export function hasCapabilityParam(fn: NormalizedFunction) {
 }
 
 export function matchMemories(memories: ExploitMemory[], query: string): MemoryReference[] {
+  const queryTerms = normalizedTerms(query);
+  if (queryTerms.length === 0) return [];
   return memories
-    .filter((memory) =>
-      `${memory.query} ${memory.summary}`.toLowerCase().includes(query.toLowerCase()),
-    )
+    .map((memory) => ({
+      memory,
+      score: scoreMemoryMatch(`${memory.query} ${memory.summary}`, queryTerms),
+    }))
+    .filter(({ score }) => score > 0)
+    .sort((left, right) => right.score - left.score)
+    .map(({ memory }) => memory)
     .map(({ id, summary }) => ({ id, summary }))
     .slice(0, 3);
+}
+
+function normalizedTerms(value: string) {
+  return normalizeMemoryText(value)
+    .split(/\s+/)
+    .filter((term) => term.length > 2);
+}
+
+function scoreMemoryMatch(value: string, queryTerms: string[]) {
+  const memoryText = normalizeMemoryText(value);
+  const matchedTerms = queryTerms.filter((term) => memoryText.includes(term));
+  if (matchedTerms.length === queryTerms.length) return matchedTerms.length;
+  return matchedTerms.length >= Math.min(2, queryTerms.length) ? matchedTerms.length : 0;
+}
+
+function normalizeMemoryText(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ");
 }
 
 export function dedupeFindings(findings: AuditFinding[]) {

@@ -257,6 +257,7 @@ export type ArtifactPointer = {
   contentHash: string;
   contentType: string;
   name: string;
+  storageBlobId?: string;
 };
 
 export type AuditReport = {
@@ -265,6 +266,8 @@ export type AuditReport = {
   artifacts: AuditReportArtifacts;
   calibration?: {
     memoryMatchedFindings: number;
+    memoryRecordsLearned?: number;
+    memoriesRecalled?: number;
     note: string;
   };
   coverage?: {

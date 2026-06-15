@@ -42,6 +42,52 @@ test("stores and verifies all audit artifacts idempotently", async () => {
   assert.equal(publicReportVerification.ok, true);
 });
 
+test("stores independent audit artifacts through a single batch writer when available", async () => {
+  class BatchedWalrusStore extends InMemoryWalrusStore {
+    batchCalls = 0;
+    singleCalls = 0;
+
+    async writeArtifact(input: Parameters<InMemoryWalrusStore["writeArtifact"]>[0]) {
+      this.singleCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return super.writeArtifact(input);
+    }
+
+    async writeArtifacts(inputs: Record<string, Parameters<InMemoryWalrusStore["writeArtifact"]>[0]>) {
+      this.batchCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const entries = await Promise.all(
+        Object.entries(inputs).map(async ([name, input]) => [
+          name,
+          { ...(await super.writeArtifact(input)), storageBlobId: "quilt-root-blob" },
+        ] as const),
+      );
+      return Object.fromEntries(entries);
+    }
+  }
+
+  const store = new BatchedWalrusStore();
+  const startedAt = Date.now();
+
+  const result = await storeAuditArtifacts({
+    contents: {
+      auditRunLog: [{ step: "scan", status: "ok" }],
+      findings: [{ ruleId: "MOVE_MISSING_CAPABILITY_PARAM" }],
+      memoryDiff: { learned: ["lesson"], recalled: [] },
+      packageSnapshot: { packageId: "0x1" },
+      privateReportMarkdown: "# Private\n",
+      publicReportMarkdown: "# Public\n",
+      sourceContext: { source: "none" },
+    },
+    store,
+  });
+
+  assert.equal(Date.now() - startedAt < 250, true);
+  assert.equal(store.batchCalls, 1);
+  assert.equal(store.singleCalls, 0);
+  assert.equal(result.artifacts.publicReport.storageBlobId, "quilt-root-blob");
+});
+
 test("recalls and writes exploit memories through the memory store interface", async () => {
   const store = new InMemoryExploitMemoryStore();
 

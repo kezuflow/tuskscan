@@ -46,6 +46,8 @@ export function createAuditReport(options: {
     artifacts: {},
     calibration: {
       memoryMatchedFindings: calibratedFindings.filter((finding) => finding.memoryAssisted).length,
+      memoryRecordsLearned: learned.length,
+      memoriesRecalled: options.memories.length,
       note:
         "Confidence is calibrated from severity, deterministic/source evidence, and historical MemWal playbook matches. It is not formal proof.",
     },

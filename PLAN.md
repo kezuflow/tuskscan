@@ -1,171 +1,136 @@
-# TuskScan: Walrus Memory Audits for Deployed Sui Move Packages
+# TuskScan Plan
 
-## Summary
+## Positioning
 
-TuskScan is a web app where a user connects a Sui wallet, pays testnet SUI, submits a deployed Sui package ID, and receives a multi-agent audit report for the actual onchain Move package.
+TuskScan is a wallet-native AI pre-audit workbench for Sui Move packages.
 
-The core Walrus-track claim: the audit workflow improves over time because exploit patterns, reports, logs, normalized package snapshots, and findings are stored as persistent Walrus/MemWal memory and reused by future audits.
+It is built for the Sui Overflow Walrus track around one simple story: an audit agent should not forget what it learned. Each paid scan stores durable Walrus artifacts, anchors proof metadata on Sui, and writes reusable exploit memory into MemWal so later scans can recall similar patterns.
 
-MVP defaults:
+TuskScan is not a professional audit replacement. It is fast AI pre-audit assistance for developers who want a structured first pass before deeper human review.
 
-- Target: deployed Sui Move packages only
-- Input: Sui package object ID
-- Surface: web app
-- Chain: real Sui testnet payment and proof objects
-- Reports: public summary, wallet-gated details
-- Audit engine: deterministic normalized-module rules plus AI explanations
+## Current Product
 
-## Key Architecture
+Users can:
 
-- Frontend: Next.js app for wallet connect, package ID submission, audit progress, report viewer, and proof verification.
-- Backend: Node service for Sui package fetch, normalized module parsing, audit orchestration, LLM calls, MemWal/Walrus writes, and Sui transaction coordination.
-- Database: Postgres for users, audit jobs, package metadata, findings index, report visibility, and async job state.
-- Queue: Redis/BullMQ for long-running audit jobs and artifact uploads.
-- Sui Move package: `AuditJob`, `AuditReport`, and payment/ownership objects on testnet.
-- Sui RPC/indexer: source of truth for package object metadata and normalized Move modules.
-- MemWal: persistent exploit memory and reusable audit lessons.
-- Walrus: durable artifacts: normalized package snapshot, findings JSON, report markdown/PDF, run logs, memory diff, and eval summary.
+- Connect a Sui wallet.
+- Paste a public GitHub URL pointing at a Move package, or use a deployed package ID fallback.
+- Load a scoped Move package snapshot from GitHub source.
+- Pay SUI through the TuskScan Move contract to create an onchain `AuditJob`.
+- Run deterministic and source-aware Sui Move audit rules.
+- Optionally run LLM researcher, exploit-writer, patch-reviewer, and false-positive critic agents through an OpenAI-compatible provider such as OpenRouter.
+- Recall previous exploit memory from MemWal and mark matching findings as memory-assisted.
+- Store package/source snapshots, findings, public/private reports, run logs, source context, and memory diffs on Walrus.
+- Finalize an onchain `AuditReport` proof object.
+- Reopen readable artifacts through the TuskScan API while preserving raw Walrus IDs as proof metadata.
 
-Audit workflow agents:
+## Architecture
 
-- Package Inspector Agent: fetches deployed package metadata and normalized modules from Sui.
-- Scanner Agent: applies deterministic vulnerability heuristics to normalized module surfaces.
-- Exploit Memory Agent: recalls similar vulnerabilities from MemWal.
-- Critic Agent: reviews findings and removes weak/duplicate claims.
-- Fix Agent: proposes remediation guidance based on available module/function signatures.
-- Report Agent: generates final public/private report artifacts.
-- Memory Agent: writes new validated exploit lessons back to MemWal.
-
-## Core Flow
-
-1. User connects Sui wallet.
-2. User submits a Sui package object ID.
-3. App validates the package ID and fetches package metadata/normalized modules from Sui testnet.
-4. User pays testnet SUI to create an onchain `AuditJob`.
-5. Backend starts audit after observing/confirming the job.
-6. Normalized package snapshot is stored on Walrus.
-7. Multi-agent workflow scans, recalls exploit memory, critiques, fixes, and reports.
-8. Report artifacts are uploaded to Walrus.
-9. Backend finalizes onchain `AuditReport` with report blob ID, package snapshot blob ID, content hashes, risk score, and visibility metadata.
-10. User sees risk score, findings summary, detailed wallet-gated report, exploit memories used, suggested fixes, Walrus artifact links, and Sui proof object.
-11. Memory Agent stores new validated exploit patterns in MemWal.
-12. Second demo audit shows memory-assisted findings reused from the prior run.
-
-## Public Interfaces
-
-Web app routes:
-
-- `/` landing and package ID submission
-- `/audit/new` create audit
-- `/audit/:id` live progress and final report
-- `/audit/:id/proof` Walrus/Sui verification view
-- `/dashboard` wallet-owned audit history
-
-Backend API:
-
-- `POST /api/audits/prepare` validates package ID, fetches package summary, and estimates audit price
-- `POST /api/audits` creates local audit record after Sui job transaction
-- `GET /api/audits/:id` returns status, findings summary, artifact metadata
-- `GET /api/audits/:id/report` returns wallet-gated private report
-- `POST /api/audits/:id/verify` fetches Walrus artifact and verifies hash against Sui report object
-
-Sui objects:
-
-```move
-AuditJob {
-  payer,
-  package_id,
-  package_digest,
-  price_paid,
-  status,
-  created_at
-}
-
-AuditReport {
-  job_id,
-  package_id,
-  package_snapshot_blob_id,
-  package_snapshot_hash,
-  report_blob_id,
-  report_hash,
-  findings_hash,
-  risk_score,
-  visibility,
-  created_at
-}
+```mermaid
+flowchart LR
+  User["User Wallet"] --> Web["Next.js Workbench"]
+  Web -->|"prepare source/package"| API["API + Queue Worker"]
+  Web -->|"create AuditJob PTB"| Sui["Sui Mainnet"]
+  API -->|"GitHub Move source"| GitHub["Public GitHub"]
+  API -->|"optional package metadata"| Sui
+  API --> Core["Audit Core"]
+  Core --> Rules["Deterministic + Source Rules"]
+  Core --> LLM["Optional LLM Agents"]
+  Core --> MemWal["MemWal Recall/Write"]
+  API --> Walrus["Walrus Artifacts"]
+  API -->|"finalize AuditReport"| Sui
+  Web -->|"report/proof/artifacts"| API
 ```
 
-Walrus artifacts:
+## Audit Pipeline
+
+1. Prepare target from GitHub source or package metadata.
+2. Normalize Move modules, structs, public/entry functions, and source evidence.
+3. Hash the prepared snapshot.
+4. User pays and creates a shared `AuditJob` on Sui.
+5. API verifies the payment transaction and job object.
+6. Queue worker recalls MemWal exploit patterns.
+7. Scanner runs deterministic metadata and source-aware rules.
+8. Optional LLM agents review, critique, and enrich explanations.
+9. Report and memory bundles are generated.
+10. Walrus stores artifacts and verifies hashes.
+11. Sui finalization stores report proof metadata.
+12. MemWal writes reusable vulnerability patterns and observations.
+13. UI shows findings, memory calibration, artifact links, and Sui proof.
+
+## Agent Roles
+
+- Scanner Agent: applies deterministic and source-aware rules.
+- Memory Agent: recalls MemWal records before scanning and writes reusable records after scanning.
+- Researcher Agent: groups findings by risk family and reviews architecture context when LLMs are configured.
+- Exploit Writer Agent: drafts exploit/test ideas for high-signal findings.
+- Patch Reviewer Agent: suggests remediation steps and test additions.
+- False Positive Critic: keeps, downgrades, or drops findings with structured reasons.
+- Report Agent: produces public/private reports and artifact bundles.
+
+## Artifact Model
+
+Walrus stores:
 
 - `package-snapshot.json`
 - `findings.json`
+- `memory-diff.json`
+- `audit-run-log.json`
+- `source-context.json`
 - `public-report.md`
 - `private-report.md`
-- `audit-run-log.json`
-- `memory-diff.json`
 
-## Implementation Phases
+The app displays browser-readable API URLs for artifacts and keeps raw `walrus://` IDs visible as proof metadata.
 
-### 1. Foundation
+## Memory Model
 
-- Scaffold the TuskScan product inside the existing Turborepo.
-- Keep `apps/web` as the main user-facing app.
-- Add backend service, Postgres schema, queue worker, and shared audit packages.
-- Add Sui wallet connect and package ID submission.
-- Fetch deployed package metadata and normalized modules through Sui RPC.
+MemWal stores:
 
-### 2. Sui Payment And Proof
+- `vulnerability_pattern`: reusable Sui Move exploit knowledge keyed by rule, category, severity, signals, exploit model, and fix pattern.
+- `audit_observation`: lightweight package-specific evidence that links a scan finding to a reusable pattern.
 
-- Implement Move package for audit jobs and reports.
-- Add frontend transaction flow for testnet SUI payment.
-- Add backend watcher/finalizer for job and report object IDs.
-- Store package ID and canonical package digest/hash in every audit proof.
+At scale, recall must stay bounded. The worker should retrieve a small relevant set, not every historical record. Future work should dedupe repeated observations and compact them into stronger pattern memories.
 
-### 3. Audit Engine
+## Demo Script
 
-- Implement deterministic normalized-module heuristics for v1:
-  - public/entry admin-like function surfaces
-  - privileged functions without obvious capability/admin parameters
-  - shared-object mutation entry points
-  - transfer/withdraw-like functions exposed as public entry points
-  - structs with risky abilities or public exposure patterns
-  - upgrade/admin/config surfaces that deserve manual review
-- Add LLM explanation layer for findings and suggested fixes.
-- Add Critic Agent pass to reduce false positives.
-- Make reports explicit that source comments/original source may be unavailable; findings are based on deployed package structure and normalized module data.
+1. Run Package A from GitHub source.
+2. Confirm findings are produced and artifacts are readable through the proof panel.
+3. Confirm MemWal writes are indexed.
+4. Run Package B from GitHub source.
+5. Confirm Package B shows recalled memory and at least one memory-assisted finding.
+6. Run Package C to show a separate bug family.
 
-### 4. Walrus And MemWal
+Suggested URLs:
 
-- Upload normalized package snapshot and report artifacts to Walrus.
-- Store/retrieve exploit memories with MemWal.
-- Mark findings as memory-assisted when recalled patterns contributed.
-- Store new validated exploit lessons after each audit.
+- `https://github.com/kezuflow/tuskscan/tree/main/move/demo-package-a`
+- `https://github.com/kezuflow/tuskscan/tree/main/move/demo-package-b`
+- `https://github.com/kezuflow/tuskscan/tree/main/move/demo-package-c`
 
-### 5. Dashboard And Demo Polish
+## Hackathon Readiness
 
-- Build audit timeline, package surface view, findings table, report viewer, and proof page.
-- Add public summary card with private details gated by connected wallet.
-- Deploy two vulnerable demo Sui testnet packages:
-  - Package A teaches exploit memory.
-  - Package B contains a similar issue and demonstrates recall.
+Good enough:
 
-## Test Plan
+- Real wallet flow.
+- Real Sui `AuditJob` and `AuditReport` objects.
+- Real Walrus artifact storage.
+- Real MemWal memory recall/write path.
+- GitHub source scoping for Sui Move packages.
+- Dense workbench UI for live demo.
+- Deterministic tests for audit rules, storage, Sui verification, and API lifecycle.
 
-- Unit test Sui package ID validation and package fetch normalization.
-- Unit test deterministic Move vulnerability heuristics with normalized module fixtures.
-- Unit test report and package snapshot hash canonicalization.
-- Integration test: package ID -> audit job -> findings -> Walrus artifacts -> Sui report.
-- Integration test: first audit writes MemWal exploit memory; second audit recalls it.
-- Wallet access test: public summary visible to anyone; private report visible only to payer/admin.
-- Proof test: fetch Walrus report/snapshot, recompute hashes, compare against Sui `AuditReport`.
-- E2E demo test with two deployed testnet packages proving memory-assisted improvement.
+Known limitations:
 
-## Assumptions
+- Not formal verification.
+- Not symbolic execution.
+- Generated tests are skeletons unless sandbox fixtures are bound.
+- Source/package equivalence is currently best-effort module matching, not bytecode/source-map proof.
+- LLM agents are optional and depend on provider configuration.
+- Manual E2E with real env should be rehearsed before judging.
 
-- Use Sui testnet for all payment/proof flows during the hackathon.
-- V1 audits deployed package metadata and normalized modules, not GitHub source repositories.
-- If verified source is unavailable, reports must avoid source-line claims and instead cite module/function/struct signatures.
-- Use redacted and structure-level findings in public summaries.
-- Full Seal encryption is a stretch goal; v1 uses wallet-gated dashboard access and public/private artifact separation.
-- The audit is positioned as AI pre-audit assistance, not a replacement for a professional security audit.
-- The winning narrative is: persistent exploit memory makes future audit agents better, and Walrus makes that memory portable, durable, and verifiable.
+## Next Milestones
+
+- Add memory dedupe and compaction for high-volume scan history.
+- Add human reviewer confirmation that writes higher-trust MemWal records.
+- Bind generated exploit tests to project fixtures.
+- Add stronger source/package equivalence checks.
+- Add report tiers: instant pre-audit, sandbox-verified, human-reviewed.
+- Add direct artifact preview/download affordances for all Walrus artifacts.

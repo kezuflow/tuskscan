@@ -2,119 +2,113 @@
 
 ## Project
 
-TuskScan is a Sui Overflow Walrus-track project. It provides paid, wallet-native AI pre-audits for deployed Sui Move packages.
+TuskScan is a Sui Overflow Walrus-track project for wallet-native AI pre-audits of Sui Move packages.
 
-The product goal is not generic static analysis. The core thesis is:
+Users connect a Sui wallet, paste a GitHub Move package URL or deployed package ID, pay into an onchain `AuditJob`, and receive a multi-agent vulnerability report with Walrus artifacts, Sui proof metadata, and MemWal-backed exploit memory.
 
-> TuskScan audit agents improve over time because exploit patterns, audit artifacts, normalized package snapshots, run logs, and reports are persisted through Walrus/MemWal and anchored with Sui proofs.
+The core thesis:
 
-Read `PLAN.md` before making product or architecture changes. Use `TASKLIST.md`
-as the ordered implementation checklist.
+> TuskScan audit agents improve over time because reusable exploit patterns and audit observations are persisted through MemWal, while reports, snapshots, run logs, source context, and memory diffs are stored as verifiable Walrus artifacts anchored by Sui proof objects.
+
+Read `PLAN.md` before making product or architecture changes. `README.md` is the operator/demo guide.
 
 ## Repository Shape
 
 This repo is a pnpm/Turborepo workspace.
 
-- `apps/web`: main Next.js product app with Sui Dapp Kit wallet connect.
-- `apps/api`: HTTP API for package prepare, audit creation, reports, and verification.
-- `apps/worker`: paid audit worker flow and retry/dead-letter behavior.
-- `apps/docs`: docs app, currently starter scaffold.
-- `packages/ui`: shared React UI components.
-- `packages/eslint-config`: shared ESLint config.
-- `packages/typescript-config`: shared TypeScript config.
-
-- `packages/audit-core`: deterministic scanner rules, agent workflow, reports.
-- `packages/storage`: Walrus and MemWal-compatible artifact/memory helpers.
-- `packages/sui-integration`: Sui package fetch, normalization, stable hashing.
-- `move/tuskscan`: Sui Move package for `AuditJob` and `AuditReport`.
-- `move/demo-package-a` and `move/demo-package-b`: intentionally unsafe demo packages.
-
-## Build Direction
-
-Prioritize the MVP in this order:
-
-1. Web app with wallet connect and deployed Sui package ID input.
-2. Sui RPC package fetch and normalized module extraction.
-3. Deterministic normalized-module vulnerability heuristics.
-4. Real Sui Mainnet `AuditJob` payment/proof flow.
-5. Walrus artifact upload for package snapshots and reports.
-6. MemWal exploit memory recall/write.
-7. Dashboard report and proof verification.
-
-Do not start with GitHub repo cloning, private source ingestion, generalized smart contract languages, Discord/Telegram, or production billing.
+- `apps/web`: main Next.js workbench with Sui Dapp Kit wallet connect, package loading, paid audit flow, findings, MemWal, Walrus, and Sui proof UI.
+- `apps/api`: Node HTTP API plus the database queue worker for prepare/create/status/report/artifact/verify routes.
+- `apps/docs`: unused starter docs app; do not spend time here for the hackathon demo.
+- `packages/audit-core`: deterministic scanner rules, source-aware rules, agent workflow, report rendering, memory extraction.
+- `packages/storage`: Walrus artifact storage and MemWal-compatible memory helpers.
+- `packages/sui-integration`: Sui RPC helpers, package normalization, payment verification, stable hashing.
+- `packages/shared`: shared report, finding, artifact, source, and sandbox types.
+- `packages/ui`: starter shared UI package; not central to the TuskScan workbench.
+- `move/tuskscan`: Sui Move package for `AuditConfig`, shared `AuditJob`, `AuditReport`, operator finalization, and events.
+- `move/demo-package-a`: intentionally unsafe package that teaches memory.
+- `move/demo-package-b`: intentionally unsafe package that should recall memory from package A.
+- `move/demo-package-c`: intentionally unsafe package for predictable randomness and vector-bound findings.
+- `docs/demo-packages.md`: demo package notes and publish commands.
 
 ## Product Defaults
 
-- Audit target: deployed Sui Move packages only.
-- Input: Sui package object ID only.
-- Chain: Sui Mainnet for hackathon unless `PLAN.md` explicitly changes it.
-- Payment: real SUI transaction to create audit job.
-- Report visibility: public summary, wallet-gated details.
-- Audit style: deterministic normalized-module rules plus AI explanation and critique.
-- Security framing: AI pre-audit assistance, not a professional audit replacement.
-- Use `TUSKSCAN_ENV=localhost` for local development. The hackathon demo must use `TUSKSCAN_ENV=production` with a real Sui `AuditJob`, real operator payment verification, Walrus artifacts, and MemWal memory.
+- Chain: Sui Mainnet for the hackathon build.
+- Input: public GitHub repository/package URL first; deployed package IDs remain supported as a fallback path.
+- Source scope: only selected Move package roots and `.move` files, not whole repositories.
+- Payment: real Sui transaction that creates a shared onchain `AuditJob`.
+- Artifacts: Walrus stores report artifacts and source/package snapshots; the browser opens artifacts through the TuskScan API proxy.
+- Memory: MemWal stores reusable vulnerability patterns and audit observations.
+- Database: Postgres/Supabase stores hot audit job state and wallet history.
+- LLMs: optional OpenRouter/OpenAI-compatible agents improve review text and critique, but deterministic rules remain the source of findings.
+- Sandbox: optional `sui move test` execution for GitHub source packages when `TUSKSCAN_RUN_MOVE_TESTS=1`.
+- Security framing: AI pre-audit assistance only, not a professional audit or deployment approval.
 
 ## Engineering Rules
 
 - Prefer TypeScript throughout app/backend/shared packages.
 - Keep deterministic scanners separate from LLM explanation logic.
-- Treat LLM output as advisory. Findings must have structured rule IDs, evidence, confidence, severity, and source basis.
-- Findings must cite package/module/function/struct identifiers. Do not invent source lines when original source is unavailable.
-- Never upload secrets, wallet keys, API keys, or private repo contents.
-- Do not clone or execute untrusted repositories in v1.
-- Keep public summaries redacted and structure-level. Private report access must be wallet-gated.
-- Do not store every intermediate event on Sui. Sui stores proof metadata and ownership; Walrus stores durable artifacts.
-- Do not replace Postgres with Walrus. Postgres is for hot state and dashboard UX.
-- Use stable canonical JSON and hashing before anchoring package snapshot/report hashes on Sui.
-- Package fetching, Walrus upload, MemWal writes, and Sui finalization must be idempotent and retry-safe.
-- Every public security claim must include the disclaimer that TuskScan is an AI pre-audit, not a professional audit.
+- LLM output may explain, critique, prioritize, and suggest patches; it must not create unsupported findings.
+- Findings must have structured rule IDs, severity, confidence, evidence, and source basis.
+- Findings should cite source file/line when GitHub source is available; otherwise cite package/module/function/struct identifiers.
+- Never commit secrets, wallet keys, API keys, private env files, or private repository contents.
+- Do not ingest an entire GitHub monorepo. Scope to the selected Move package root.
+- Keep public summaries redacted and structure-level. Private report details require wallet session auth.
+- Do not store every intermediate event on Sui. Sui stores proof metadata; Walrus stores durable artifacts.
+- Do not replace Postgres with Walrus. Postgres is for live queue state and dashboard UX.
+- Use stable canonical JSON and content hashes before anchoring report or snapshot references on Sui.
+- Package fetching, Walrus upload, MemWal writes, and Sui finalization must be retry-safe.
+- Every public security claim must include the TuskScan AI pre-audit disclaimer.
 
-## Sui And Walrus Rules
+## Sui, Walrus, MemWal
 
-- Use Sui Mainnet by default unless `PLAN.md` explicitly changes it.
-- Verify a submitted package ID resolves to a package object before accepting payment.
-- Verify submitted payment transactions on Sui RPC. The transaction must succeed, be sent by the claimed payer, create the claimed `AuditJob`, match the prepared package hash, and credit the configured operator address.
-- Store the package ID and canonical package snapshot hash in every audit proof.
-- Wait for Sui transaction finality before starting paid audit work.
-- Walrus artifacts must be content-addressed or hash-verified before displaying "verified" in the UI.
-- MemWal memories should store exploit patterns and lessons, not raw private user data.
-- If Seal encryption is added, keep encrypted artifact paths separate from public summary artifacts.
+- Use Sui Mainnet by default.
+- Verify submitted payment transactions on Sui RPC. The transaction must succeed, be sent by the claimed payer, create the claimed `AuditJob`, match the prepared package hash, and credit the configured operator.
+- `AuditJob` objects are shared objects; verifier logic should accept upgraded package type IDs when the original type still matches `audit::AuditJob`.
+- Store package/source snapshot hashes and private report hashes in the Sui finalization path.
+- Walrus artifacts must be hash-verified before presenting them as verified.
+- Browser-readable artifact links should go through `/api/audits/:id/artifacts/:artifactName`, not raw `walrus://` identifiers.
+- MemWal records should be searchable, compact, and structured. Prefer reusable vulnerability patterns over duplicate raw scan text.
+- `MEMWAL_WAIT_FOR_REMEMBER=1` keeps package A -> package B demos deterministic by waiting for indexing before scan completion.
 
-## Audit Correctness Rules
+## Audit Correctness
 
-- Deterministic rules produce the finding candidates; AI agents explain, critique, prioritize, and propose fixes.
-- A finding should be dropped or downgraded if the Critic Agent cannot identify concrete normalized-module evidence.
-- Risk scores must be derived from structured findings, not from free-form LLM text alone.
-- Memory-assisted findings must list the recalled exploit memory ID or reference.
-- Reports based only on normalized modules must say that original source comments and line numbers may be unavailable.
+- Deterministic and source-aware rules produce finding candidates.
+- The critic can downgrade/drop weak findings only with a structured reason.
+- Risk scores derive from structured findings, not free-form LLM text.
+- Memory-assisted findings must include recalled memory references.
+- Reports should be clear about what was scanned: GitHub Move source, optional Sui package metadata, or metadata-only fallback.
+- Sandbox-generated tests are compile-only skeletons unless explicitly bound to project fixtures.
 
 ## Validation
 
-Before considering an implementation ready, run the relevant checks:
+Before considering changes ready, run the focused checks for touched packages. For broad changes, run:
 
-```sh
+```powershell
 pnpm lint
 pnpm check-types
 pnpm build
+pnpm --filter api test
+pnpm --filter @repo/audit-core test
+pnpm --filter @repo/storage test
+pnpm --filter @repo/sui-integration test
 ```
 
-For feature work, add targeted tests for:
+For Move changes, run:
 
-- Sui package ID validation.
-- normalized module fetch and canonicalization.
-- vulnerability rule fixtures.
-- package snapshot and report hash verification.
-- access control for private report details.
-- first-audit memory write and second-audit memory recall.
-- idempotent job retry behavior.
+```powershell
+sui move test
+```
+
+from the relevant `move/*` package.
 
 ## Demo Narrative
 
-The core hackathon demo should show two deployed Sui package audits:
+The hackathon demo should show:
 
-1. Package A contains a vulnerability. TuskScan finds it from normalized module structure, stores the report on Walrus, anchors a proof on Sui, and writes an exploit lesson to MemWal.
-2. Package B contains a similar vulnerability. TuskScan recalls the prior exploit memory and marks the finding as memory-assisted.
+1. Package A GitHub URL loads scoped Move source, runs a paid audit, stores artifacts on Walrus, anchors proof on Sui, and writes reusable exploit memory to MemWal.
+2. Package B GitHub URL runs next and recalls the prior pattern, showing memory-assisted findings.
+3. Package C shows the scanner catches another bug family, such as predictable randomness or vector-bound issues.
 
 The punchline:
 
-> The agent did not just scan code. It learned a reusable exploit pattern, persisted that memory through Walrus/MemWal, and used it to improve a future audit of an actual deployed Sui package.
+> TuskScan is not just a scanner. It is a wallet-native Sui Move pre-audit workbench whose agents build reusable exploit memory across audits, with Walrus artifacts and Sui proof objects for verification.

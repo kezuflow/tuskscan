@@ -40,12 +40,12 @@ flowchart LR
   User["User Wallet"] --> Web["Next.js Web App"]
   Web -->|"prepare package"| API["API Service"]
   Web -->|"create AuditJob PTB"| Sui["Sui Mainnet"]
-  API -->|"fetch normalized modules"| Sui
-  API --> Worker["Audit Worker"]
-  Worker --> Core["Audit Core Agents"]
+  API -->|"GitHub Move source"| GitHub["Public GitHub"]
+  API -->|"optional package metadata"| Sui
+  API --> Core["Audit Core Agents"]
   Core --> Memory["MemWal Memory"]
-  Worker --> Walrus["Walrus Artifacts"]
-  Worker -->|"finalize AuditReport"| Sui
+  API --> Walrus["Walrus Artifacts"]
+  API -->|"finalize AuditReport"| Sui
   Web -->|"report/proof"| API
   API --> Walrus
 ```
@@ -63,6 +63,8 @@ flowchart LR
 - `move/demo-package-b`: intentionally unsafe demo package that should recall memory from A.
 - `move/demo-package-c`: intentionally unsafe lottery package for predictable randomness and vector-bound findings.
 - `docs/demo-packages.md`: publish commands and package ID recording area.
+- `PLAN.md`: current product/architecture plan.
+- `AGENTS.md`: coding-agent guidance for this repo.
 
 ## Setup
 
@@ -252,7 +254,6 @@ pnpm build
 pnpm --filter @repo/audit-core test
 pnpm --filter @repo/storage test
 pnpm --filter api test
-sui move test
 ```
 
 Demo package checks:

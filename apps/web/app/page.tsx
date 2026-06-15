@@ -637,8 +637,15 @@ export default function Home() {
 
   async function openArtifactDownload(row: (typeof proofRows)[number]) {
     if (!row.downloadHref) return;
-    const targetWindow = window.open("about:blank", "_blank", "noopener,noreferrer");
+    const targetWindow = window.open("about:blank", "_blank");
+    if (targetWindow) {
+      targetWindow.document.title = `TuskScan ${row.name}`;
+      targetWindow.document.body.textContent = `Loading ${row.name} from TuskScan API...`;
+    }
     try {
+      if (row.protected && !account) {
+        throw new Error("Connect the payer wallet to open private audit artifacts.");
+      }
       const token = row.protected && account
         ? await getPrivateReportSession(account.address)
         : undefined;
@@ -653,7 +660,7 @@ export default function Home() {
       if (targetWindow) {
         targetWindow.location.href = objectUrl;
       } else {
-        window.open(objectUrl, "_blank", "noopener,noreferrer");
+        window.open(objectUrl, "_blank");
       }
       window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
       appendLogs([
@@ -965,7 +972,7 @@ export default function Home() {
                       )}
                     </dd>
                   </div>
-                  {proofRows.slice(0, 4).map((row) => (
+                  {proofRows.map((row) => (
                     <div key={row.name}>
                       <dt>{row.name.toUpperCase()}</dt>
                       <dd>
@@ -976,7 +983,7 @@ export default function Home() {
                             target="_blank"
                             title={`Open readable ${row.name}`}
                           >
-                            {row.uri}
+                            {row.downloadHref}
                           </a>
                         ) : row.downloadHref ? (
                           <button
@@ -985,11 +992,12 @@ export default function Home() {
                             title={`Open readable ${row.name}`}
                             type="button"
                           >
-                            {row.uri}
+                            {row.downloadHref}
                           </button>
                         ) : (
                           <span>{row.uri}</span>
                         )}
+                        <small>walrus artifact {row.uri}</small>
                         {row.storageUri && row.storageUri !== row.uri ? (
                           <small>stored in {row.storageUri}</small>
                         ) : null}

@@ -4,8 +4,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 import { Transaction } from "@mysten/sui/transactions";
@@ -70,13 +70,18 @@ import { summarizePackage } from "@repo/sui-integration";
 type RuntimeConfig = {
   databaseUrl?: string;
   environment: "localhost" | "production";
+  processJobsInApi: boolean;
   llmApiKey?: string;
   llmBaseUrl?: string;
+  llmReferer?: string;
   llmModel?: string;
+  llmTitle?: string;
   memwalAccountId?: string;
   memwalNamespace?: string;
   memwalPrivateKey?: string;
   memwalServerUrl?: string;
+  memwalTimeoutMs: number;
+  memwalWaitForRemember: boolean;
   operatorAddress?: string;
   network: Network;
   operatorCapId?: string;
@@ -91,6 +96,7 @@ type RuntimeConfig = {
   walrusAggregatorUrl?: string;
   walrusPublisherUrl?: string;
   walrusStorageEpochs: number;
+  walrusWriteTimeoutMs: number;
 };
 
 type ApiDependencies = {
@@ -149,6 +155,8 @@ type AuthSessionRequest = {
   signature?: string;
 };
 
+type AuditArtifactName = keyof Required<AuditReport["artifacts"]>;
+
 type LocalAuditJob = {
   artifacts?: AuditReport["artifacts"];
   attempts?: number;
@@ -184,30 +192,50 @@ type AuditJobStore = {
   completeJob(job: LocalAuditJob, workerId: string): Promise<void>;
   failJob(job: LocalAuditJob, workerId: string, error: unknown): Promise<void>;
   get(id: string): Promise<LocalAuditJob | undefined>;
+  listClaimableIds(limit: number): Promise<string[]>;
   listByPayer(payer: string): Promise<LocalAuditJob[]>;
-  save(job: LocalAuditJob): Promise<void>;
+  save(job: LocalAuditJob): Promise<LocalAuditJob>;
 };
 
 type AuditJobProcessor = (jobId: string) => Promise<void>;
 
 const DEFAULT_PRICE_MIST = "1000000";
 const JOB_LOCK_MS = 10 * 60 * 1000;
+const JOB_RETRY_DELAY_MS = 60 * 1000;
 const SESSION_TTL_MS = 15 * 60 * 1000;
+const auditArtifactNames = [
+  "auditRunLog",
+  "findings",
+  "memoryDiff",
+  "packageSnapshot",
+  "privateReport",
+  "publicReport",
+  "sourceContext",
+] as const satisfies readonly AuditArtifactName[];
+const publicArtifactNames = new Set<AuditArtifactName>(["publicReport"]);
 const execFileAsync = promisify(execFile);
+
+class UserInputError extends Error {}
 
 loadLocalEnvFiles();
 
 export function loadRuntimeConfig(env = process.env): RuntimeConfig {
+  const openRouterApiKey = env.OPENROUTER_API_KEY;
   return {
     databaseUrl: env.DATABASE_URL ?? env.SUPABASE_DATABASE_URL,
     environment: parseRuntimeEnvironment(env.TUSKSCAN_ENV),
-    llmApiKey: env.LLM_API_KEY ?? env.OPENAI_API_KEY,
-    llmBaseUrl: env.LLM_BASE_URL ?? env.OPENAI_BASE_URL,
-    llmModel: env.LLM_MODEL ?? env.OPENAI_MODEL,
+    processJobsInApi: parseBoolean(env.TUSKSCAN_PROCESS_JOBS_IN_API),
+    llmApiKey: env.LLM_API_KEY ?? env.OPENAI_API_KEY ?? openRouterApiKey,
+    llmBaseUrl: env.LLM_BASE_URL ?? env.OPENAI_BASE_URL ?? (openRouterApiKey ? "https://openrouter.ai/api/v1" : undefined),
+    llmModel: env.LLM_MODEL ?? env.OPENAI_MODEL ?? (openRouterApiKey ? "openai/gpt-4.1-mini" : undefined),
+    llmReferer: env.LLM_HTTP_REFERER ?? env.OPENROUTER_HTTP_REFERER,
+    llmTitle: env.LLM_APP_TITLE ?? env.OPENROUTER_APP_TITLE ?? "TuskScan",
     memwalAccountId: env.MEMWAL_ACCOUNT_ID,
     memwalNamespace: env.MEMWAL_NAMESPACE ?? "tuskscan",
     memwalPrivateKey: env.MEMWAL_PRIVATE_KEY,
     memwalServerUrl: env.MEMWAL_SERVER_URL,
+    memwalTimeoutMs: parsePositiveInteger(env.MEMWAL_TIMEOUT_MS, 120_000),
+    memwalWaitForRemember: parseBooleanWithDefault(env.MEMWAL_WAIT_FOR_REMEMBER, true),
     network: (env.SUI_NETWORK as Network | undefined) ?? DEFAULT_NETWORK,
     operatorAddress: env.TUSKSCAN_OPERATOR_ADDRESS,
     operatorCapId: env.TUSKSCAN_OPERATOR_CAP_ID,
@@ -222,11 +250,17 @@ export function loadRuntimeConfig(env = process.env): RuntimeConfig {
     walrusAggregatorUrl: env.WALRUS_AGGREGATOR_URL,
     walrusPublisherUrl: env.WALRUS_PUBLISHER_URL,
     walrusStorageEpochs: parsePositiveInteger(env.WALRUS_STORAGE_EPOCHS, 3),
+    walrusWriteTimeoutMs: parsePositiveInteger(env.WALRUS_WRITE_TIMEOUT_MS, 120_000),
   };
 }
 
 function parseBoolean(value: string | undefined) {
   return value === "1" || value?.toLowerCase() === "true";
+}
+
+function parseBooleanWithDefault(value: string | undefined, fallback: boolean) {
+  if (value === undefined) return fallback;
+  return parseBoolean(value);
 }
 
 function parsePositiveInteger(value: string | undefined, fallback: number) {
@@ -251,8 +285,14 @@ function parsePriceMist(value: string | undefined) {
 
 function loadLocalEnvFiles() {
   const protectedKeys = new Set(Object.keys(process.env));
-  for (const file of [".env"]) {
-    const path = resolve(process.cwd(), file);
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolve(process.cwd(), ".env"),
+    resolve(process.cwd(), "../api/.env"),
+    resolve(process.cwd(), "apps/api/.env"),
+    resolve(moduleDir, "../.env"),
+  ];
+  for (const path of [...new Set(candidates)]) {
     if (!existsSync(path)) continue;
     for (const [key, value] of Object.entries(
       parseEnvFile(readFileSync(path, "utf8")),
@@ -308,6 +348,7 @@ export function validateRuntimeConfig(config: RuntimeConfig) {
     paymentVerifier: config.tuskscanPackageId && config.operatorAddress
       ? "production"
       : "missing",
+    apiWorker: config.processJobsInApi ? "enabled" : "external-worker-required",
     suiRpc: getRpcUrl(config),
     walrus: isLocalhost(config)
       ? "localhost"
@@ -341,6 +382,11 @@ export function createTuskscanApiServer(dependencies: ApiDependencies = {}) {
     });
   const challenges = new Map<string, { address: string; expiresAt: number; message: string }>();
   const sessions = new Map<string, { address: string; expiresAt: number }>();
+  const kickAuditProcessing = async (jobId: string) => {
+    if (!dependencies.processJobsInline) return;
+    const processing = auditProcessor(jobId);
+    await processing;
+  };
 
   return createServer(async (request, response) => {
     response.setHeader("access-control-allow-origin", "*");
@@ -419,9 +465,15 @@ export function createTuskscanApiServer(dependencies: ApiDependencies = {}) {
         const body = await readJson<PreparedAuditRequest>(request);
         const validation = validatePrepareRequest(body);
         if (!validation.ok) {
+          console.warn("[TuskScan:E2E] prepare rejected", { reason: validation.error });
           sendJson(response, 400, { error: validation.error });
           return;
         }
+        console.info("[TuskScan:E2E] prepare requested", {
+          network: validation.network,
+          packageId: validation.packageId ? shortLog(validation.packageId) : null,
+          sourceUrl: validation.sourceUrl ?? null,
+        });
 
         const sourceContext =
           (dependencies.fetchSourceContext ?? fetchSourceContext)(
@@ -435,6 +487,9 @@ export function createTuskscanApiServer(dependencies: ApiDependencies = {}) {
           });
           return;
         }
+        if (resolvedSourceContext) {
+          assertSourceContextScannable(resolvedSourceContext);
+        }
 
         const snapshot = resolvedSourceContext
           ? await createSourcePackageSnapshot(resolvedSourceContext, validation.network)
@@ -444,6 +499,17 @@ export function createTuskscanApiServer(dependencies: ApiDependencies = {}) {
               rpcUrl: getRpcUrl(config),
             });
         const packageSummary = summarizePackage(snapshot);
+        console.info("[TuskScan:E2E] prepare snapshot ready", {
+          modules: packageSummary.moduleCount,
+          moveFiles: resolvedSourceContext?.files.length ?? 0,
+          packageId: shortLog(packageSummary.packageId),
+          sourceUrl: resolvedSourceContext?.url ?? null,
+        });
+        if (resolvedSourceContext) {
+          console.info(
+            `Prepared GitHub Move package ${packageSummary.packageId} from ${resolvedSourceContext.files.length} source file(s).`,
+          );
+        }
         sendJson(response, 200, {
           disclaimer: AI_PRE_AUDIT_DISCLAIMER,
           packageSummary,
@@ -459,14 +525,28 @@ export function createTuskscanApiServer(dependencies: ApiDependencies = {}) {
         const body = await readJson<CreateAuditRequest>(request);
         const validation = validateCreateAuditRequest(body);
         if (!validation.ok) {
+          console.warn("[TuskScan:E2E] create audit rejected", { reason: validation.error });
           sendJson(response, 400, { error: validation.error });
           return;
         }
+        console.info("[TuskScan:E2E] create audit requested", {
+          digest: shortLog(validation.suiTransactionDigest),
+          jobObjectId: shortLog(validation.suiJobObjectId),
+          network: validation.network,
+          packageId: shortLog(validation.packageId),
+          payer: shortLog(validation.payer),
+          sourceUrl: validation.sourceUrl ?? null,
+        });
 
         const sourceContext = await (dependencies.fetchSourceContext ?? fetchSourceContext)(
           validation.sourceUrl,
           validation.network,
         );
+        if (sourceContext) {
+          assertSourceContextScannable(sourceContext);
+        } else if (validation.sourceUrl) {
+          throw new UserInputError("GitHub source context could not be loaded for this audit target.");
+        }
         const snapshot = sourceContext
           ? await createSourcePackageSnapshot(sourceContext, validation.network, validation.packageId)
           : await fetchPackage({
@@ -487,6 +567,11 @@ export function createTuskscanApiServer(dependencies: ApiDependencies = {}) {
           payer: validation.payer,
           priceMist: config.priceMist,
         });
+        console.info("[TuskScan:E2E] payment verified", {
+          digest: shortLog(validation.suiTransactionDigest),
+          jobObjectId: shortLog(validation.suiJobObjectId),
+          snapshotHash: shortLog(snapshotHash),
+        });
 
         const packageSummary = summarizePackage(snapshot);
         const job: LocalAuditJob = {
@@ -503,20 +588,19 @@ export function createTuskscanApiServer(dependencies: ApiDependencies = {}) {
           suiJobObjectId: normalizeSuiObjectId(validation.suiJobObjectId),
           suiTransactionDigest: validation.suiTransactionDigest,
         };
-        await auditStore.save(job);
+        const storedJob = await auditStore.save(job);
+        console.info("[TuskScan:E2E] audit job saved", {
+          auditId: storedJob.id,
+          status: storedJob.status,
+        });
+        console.info(
+          `Accepted paid audit job ${storedJob.id} for ${storedJob.packageId} with status ${storedJob.status}.`,
+        );
 
-        const processing = auditProcessor(job.id);
-        if (dependencies.processJobsInline) {
-          await processing;
-        } else {
-          processing.catch((error: unknown) => {
-            console.error(
-              `Failed to process audit job ${job.id}:`,
-              error instanceof Error ? error.message : error,
-            );
-          });
+        if (canClaimJob(storedJob)) {
+          await kickAuditProcessing(storedJob.id);
         }
-        const currentJob = (await auditStore.get(job.id)) ?? job;
+        const currentJob = (await auditStore.get(storedJob.id)) ?? storedJob;
 
         sendJson(response, 202, {
           auditId: currentJob.id,
@@ -539,7 +623,11 @@ export function createTuskscanApiServer(dependencies: ApiDependencies = {}) {
           return;
         }
         const audits = await auditStore.listByPayer(address);
-        sendJson(response, 200, { audits: audits.map(publicJob) });
+        await Promise.all(
+          audits.filter(canClaimJob).map((job) => kickAuditProcessing(job.id)),
+        );
+        const refreshedAudits = await auditStore.listByPayer(address);
+        sendJson(response, 200, { audits: refreshedAudits.map(publicJob) });
         return;
       }
 
@@ -550,7 +638,11 @@ export function createTuskscanApiServer(dependencies: ApiDependencies = {}) {
           sendJson(response, 404, { error: "Audit not found." });
           return;
         }
-        sendJson(response, 200, publicJob(job));
+        if (canClaimJob(job)) {
+          await kickAuditProcessing(job.id);
+        }
+        const refreshedJob = (await auditStore.get(job.id)) ?? job;
+        sendJson(response, 200, publicJob(refreshedJob));
         return;
       }
 
@@ -574,6 +666,45 @@ export function createTuskscanApiServer(dependencies: ApiDependencies = {}) {
           report: includePrivate
             ? job.report
             : { ...job.report, findings: job.report.findings.slice(0, 3) },
+        });
+        return;
+      }
+
+      const artifactMatch = url.pathname.match(/^\/api\/audits\/([^/]+)\/artifacts\/([^/]+)$/);
+      if (request.method === "GET" && artifactMatch) {
+        const job = await auditStore.get(artifactMatch[1] ?? "");
+        if (!job?.report) {
+          sendJson(response, 404, { error: "Report not found." });
+          return;
+        }
+
+        const artifactName = parseAuditArtifactName(artifactMatch[2] ?? "");
+        if (!artifactName) {
+          sendJson(response, 404, { error: "Artifact not found." });
+          return;
+        }
+
+        const session = readSession(request, sessions);
+        const includePrivate =
+          Boolean(session) && session?.address.toLowerCase() === job.payer.toLowerCase();
+        if (!publicArtifactNames.has(artifactName) && !includePrivate) {
+          sendJson(response, 401, { error: "Wallet session required." });
+          return;
+        }
+
+        const artifact = await readAuditArtifact({
+          artifactName,
+          job,
+          store: dependencies.walrus ?? createWalrusStore(config),
+        });
+        if (!artifact) {
+          sendJson(response, 404, { error: "Artifact not found." });
+          return;
+        }
+
+        sendContent(response, 200, artifact.content, {
+          contentType: artifact.contentType,
+          filename: artifact.filename,
         });
         return;
       }
@@ -609,11 +740,84 @@ export function createTuskscanApiServer(dependencies: ApiDependencies = {}) {
 
       sendJson(response, 404, { error: "Not found." });
     } catch (error) {
-      sendJson(response, 500, {
+      sendJson(response, error instanceof UserInputError ? 400 : 500, {
         error: error instanceof Error ? error.message : "Unexpected error.",
       });
     }
   });
+}
+
+export function createTuskscanQueueWorker(options: {
+  batchSize?: number;
+  pollIntervalMs?: number;
+} = {}) {
+  const config = loadRuntimeConfig();
+  assertRuntimeRequirements(config);
+  const auditStore = createAuditJobStore(config);
+  const auditProcessor = createAuditJobProcessor({
+    auditStore,
+    config,
+    fetchPackage: fetchNormalizedPackage,
+    workerName: "worker",
+  });
+  const batchSize = options.batchSize ?? 5;
+  const pollIntervalMs = options.pollIntervalMs ?? 2_000;
+  let stopped = false;
+
+  const poll = async () => {
+    const ids = await auditStore.listClaimableIds(batchSize);
+    if (ids.length) {
+      console.info(`Worker found ${ids.length} claimable audit job(s): ${ids.join(", ")}`);
+    }
+    for (const id of ids) {
+      try {
+        await auditProcessor(id);
+      } catch (error) {
+        console.error(
+          `Worker failed audit job ${id}:`,
+          error instanceof Error ? error.message : error,
+        );
+      }
+    }
+    return ids.length;
+  };
+
+  const start = () => {
+    console.info(
+      `TuskScan worker polling database queue for ${config.network} audit jobs every ${pollIntervalMs}ms.`,
+    );
+    let emptyPolls = 0;
+    const loop = async () => {
+      while (!stopped) {
+        try {
+          const claimed = await poll();
+          if (claimed === 0) {
+            emptyPolls += 1;
+            if (emptyPolls % 15 === 0) {
+              console.info("TuskScan worker found no claimable database jobs.");
+            }
+          } else {
+            emptyPolls = 0;
+          }
+        } catch (error) {
+          console.error(
+            "TuskScan worker poll failed:",
+            error instanceof Error ? error.message : error,
+          );
+        }
+        await sleep(pollIntervalMs);
+      }
+    };
+    void loop();
+  };
+
+  return {
+    poll,
+    start,
+    stop: () => {
+      stopped = true;
+    },
+  };
 }
 
 function assertRuntimeRequirements(config: RuntimeConfig) {
@@ -648,6 +852,26 @@ function assertRuntimeRequirements(config: RuntimeConfig) {
   if (missing.length > 0) {
     throw new Error(`Missing required TuskScan runtime config: ${missing.join(", ")}`);
   }
+  assertValidOperatorPrivateKey(config.operatorPrivateKey, config.operatorAddress);
+}
+
+function assertValidOperatorPrivateKey(privateKey: string | undefined, operatorAddress: string | undefined) {
+  if (!privateKey || !operatorAddress) return;
+  let keypair: Ed25519Keypair;
+  try {
+    keypair = Ed25519Keypair.fromSecretKey(privateKey);
+  } catch {
+    throw new Error(
+      `TUSKSCAN_OPERATOR_PRIVATE_KEY is not a valid Ed25519 Sui private key. Export the full key with "sui keytool export --key-identity ${operatorAddress}" and paste the complete suiprivkey value.`,
+    );
+  }
+  const derivedAddress = normalizeSuiObjectId(keypair.toSuiAddress());
+  const configuredAddress = normalizeSuiObjectId(operatorAddress);
+  if (derivedAddress.toLowerCase() !== configuredAddress.toLowerCase()) {
+    throw new Error(
+      `TUSKSCAN_OPERATOR_PRIVATE_KEY derives ${derivedAddress}, but TUSKSCAN_OPERATOR_ADDRESS is ${configuredAddress}. Export the key for the configured operator address or update TUSKSCAN_OPERATOR_ADDRESS.`,
+    );
+  }
 }
 
 function createWalrusStore(config: RuntimeConfig): WalrusStore {
@@ -660,6 +884,7 @@ function createWalrusStore(config: RuntimeConfig): WalrusStore {
       key: config.operatorPrivateKey,
       network: config.network,
       rpcUrl: getRpcUrl(config),
+      writeTimeoutMs: config.walrusWriteTimeoutMs,
     });
   }
   const aggregatorUrl = isConfiguredHttpUrl(config.walrusAggregatorUrl)
@@ -686,6 +911,8 @@ function createMemoryStore(config: RuntimeConfig): MemoryStore {
       key: config.memwalPrivateKey,
       namespace: config.memwalNamespace,
       serverUrl: config.memwalServerUrl,
+      timeoutMs: config.memwalTimeoutMs,
+      waitForRemember: config.memwalWaitForRemember,
     });
   }
   throw new Error("MemWal account/delegate key env vars are required.");
@@ -710,23 +937,39 @@ function createAuditJobProcessor(options: {
   findingAgent?: AuditFindingAgent;
   memory?: MemoryStore;
   walrus?: WalrusStore;
+  workerName?: string;
 }): AuditJobProcessor {
   const agents = createLlmAuditAgents(options.config);
-  const workerId = `api-${process.pid}-${randomUUID()}`;
+  const workerId = `${options.workerName ?? "api"}-${process.pid}-${randomUUID()}`;
   return async (jobId) => {
     const job = await options.auditStore.claimJob(jobId, workerId, JOB_LOCK_MS);
     if (!job) return;
+    console.info("[TuskScan:E2E] worker claimed job", {
+      auditId: job.id,
+      attempts: job.attempts,
+      packageId: shortLog(job.packageId),
+      sourceUrl: job.sourceUrl ?? null,
+      workerId,
+    });
+    console.info(`Worker ${workerId} claimed audit job ${job.id} for ${job.packageId}.`);
 
     try {
-      const snapshot = await options.fetchPackage({
-        network: job.network,
-        packageId: job.packageId,
-        rpcUrl: getRpcUrl(options.config),
-      });
+      const snapshot = job.sourceContext
+        ? await createSourcePackageSnapshot(job.sourceContext, job.network, job.packageId)
+        : await options.fetchPackage({
+            network: job.network,
+            packageId: job.packageId,
+            rpcUrl: getRpcUrl(options.config),
+          });
       const snapshotHash = await hashSnapshot(snapshot);
       if (snapshotHash !== job.snapshotHash) {
         throw new Error("Fetched package snapshot hash does not match paid audit job.");
       }
+      console.info("[TuskScan:E2E] worker snapshot verified", {
+        auditId: job.id,
+        modules: snapshot.modules.length,
+        snapshotHash: shortLog(snapshotHash),
+      });
 
       await runStoreAndFinalizeAudit({
         config: options.config,
@@ -739,8 +982,17 @@ function createAuditJobProcessor(options: {
         walrus: options.walrus ?? createWalrusStore(options.config),
       });
       await options.auditStore.completeJob(job, workerId);
+      console.info("[TuskScan:E2E] worker completed job", {
+        auditId: job.id,
+        reportObjectId: job.reportObjectId ? shortLog(job.reportObjectId) : null,
+        status: job.status,
+      });
     } catch (error) {
       await options.auditStore.failJob(job, workerId, error);
+      console.error("[TuskScan:E2E] worker failed job", {
+        auditId: job.id,
+        error: errorMessage(error),
+      });
       throw error;
     }
   };
@@ -802,19 +1054,29 @@ export class InMemoryAuditJobStore implements AuditJobStore {
       throw new Error("Audit job lock is owned by another worker.");
     }
     const attempts = current?.attempts ?? job.attempts ?? 1;
+    const retryAt = new Date(Date.now() + JOB_RETRY_DELAY_MS).toISOString();
     this.jobs.set(job.id, {
       ...current,
       ...job,
       lastError: error instanceof Error ? error.message : "Unexpected audit worker error.",
       lockedAt: undefined,
       lockedBy: undefined,
-      lockExpiresAt: undefined,
+      lockExpiresAt:
+        attempts >= (job.maxAttempts ?? current?.maxAttempts ?? 3) ? undefined : retryAt,
       status: attempts >= (job.maxAttempts ?? current?.maxAttempts ?? 3) ? "failed" : "queued",
     });
   }
 
   async get(id: string) {
     return this.jobs.get(id);
+  }
+
+  async listClaimableIds(limit: number) {
+    return Array.from(this.jobs.values())
+      .filter(canClaimJob)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .slice(0, Math.max(1, limit))
+      .map((job) => job.id);
   }
 
   async listByPayer(payer: string) {
@@ -825,7 +1087,13 @@ export class InMemoryAuditJobStore implements AuditJobStore {
   }
 
   async save(job: LocalAuditJob) {
-    this.jobs.set(job.id, { attempts: 0, maxAttempts: 3, ...job });
+    const existing = Array.from(this.jobs.values()).find(
+      (item) => item.id === job.id || item.suiJobObjectId === job.suiJobObjectId,
+    );
+    if (existing) return existing;
+    const stored = { attempts: 0, maxAttempts: 3, ...job };
+    this.jobs.set(job.id, stored);
+    return stored;
   }
 }
 
@@ -850,9 +1118,9 @@ class PostgresAuditJobStore implements AuditJobStore {
         from audit_jobs
         where id = $1
           and (
-            status = 'queued'
+            (status = 'queued' and (lock_expires_at is null or lock_expires_at < now()))
             or (status = 'running' and lock_expires_at < now())
-            or (status = 'failed' and attempts < max_attempts)
+            or (status = 'failed' and attempts < max_attempts and (lock_expires_at is null or lock_expires_at < now()))
           )
         for update skip locked
       )
@@ -916,11 +1184,14 @@ class PostgresAuditJobStore implements AuditJobStore {
       set last_error = $3,
         locked_at = null,
         locked_by = null,
-        lock_expires_at = null,
+        lock_expires_at = case
+          when attempts >= max_attempts then null
+          else now() + ($4::text || ' milliseconds')::interval
+        end,
         status = case when attempts >= max_attempts then 'failed' else 'queued' end,
         updated_at = now()
       where id = $1 and locked_by = $2 and status = 'running'`,
-      [job.id, workerId, message],
+      [job.id, workerId, message, JOB_RETRY_DELAY_MS],
     );
     if (result.rowCount !== 1) {
       throw new Error("Audit job could not be failed because the lock was lost.");
@@ -935,6 +1206,21 @@ class PostgresAuditJobStore implements AuditJobStore {
     return result.rows[0] ? rowToAuditJob(result.rows[0] as AuditJobRow) : undefined;
   }
 
+  async listClaimableIds(limit: number) {
+    await this.ensureSchema();
+    const result = await this.pool.query(
+      `select id
+      from audit_jobs
+      where (status = 'queued' and (lock_expires_at is null or lock_expires_at < now()))
+        or (status = 'running' and lock_expires_at < now())
+        or (status = 'failed' and attempts < max_attempts and (lock_expires_at is null or lock_expires_at < now()))
+      order by created_at asc
+      limit $1`,
+      [Math.max(1, limit)],
+    );
+    return result.rows.map((row: { id: string }) => row.id);
+  }
+
   async listByPayer(payer: string) {
     await this.ensureSchema();
     const result = await this.pool.query(
@@ -946,7 +1232,7 @@ class PostgresAuditJobStore implements AuditJobStore {
 
   async save(job: LocalAuditJob) {
     await this.ensureSchema();
-    await this.pool.query(
+    const result = await this.pool.query(
       `insert into audit_jobs (
         id,
         artifacts,
@@ -980,33 +1266,8 @@ class PostgresAuditJobStore implements AuditJobStore {
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
         $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, now()
       )
-      on conflict (id) do update set
-        artifacts = excluded.artifacts,
-        attempts = excluded.attempts,
-        completed_at = excluded.completed_at,
-        finalized_digest = excluded.finalized_digest,
-        last_error = excluded.last_error,
-        locked_at = excluded.locked_at,
-        locked_by = excluded.locked_by,
-        lock_expires_at = excluded.lock_expires_at,
-        max_attempts = excluded.max_attempts,
-        network = excluded.network,
-        package_id = excluded.package_id,
-        package_summary = excluded.package_summary,
-        payer = excluded.payer,
-        private_report_markdown = excluded.private_report_markdown,
-        public_report_markdown = excluded.public_report_markdown,
-        report = excluded.report,
-        report_object_id = excluded.report_object_id,
-        snapshot_hash = excluded.snapshot_hash,
-        source_context = excluded.source_context,
-        source_url = excluded.source_url,
-        started_at = excluded.started_at,
-        status = excluded.status,
-        sui_job_object_id = excluded.sui_job_object_id,
-        sui_transaction_digest = excluded.sui_transaction_digest,
-        verification = excluded.verification,
-        updated_at = now()`,
+      on conflict do nothing
+      returning *`,
       [
         job.id,
         job.artifacts ?? null,
@@ -1037,6 +1298,16 @@ class PostgresAuditJobStore implements AuditJobStore {
         job.verification ?? null,
       ],
     );
+    const inserted = result.rows[0];
+    if (inserted) return rowToAuditJob(inserted as AuditJobRow);
+    const existing = await this.pool.query(
+      "select * from audit_jobs where id = $1 or sui_job_object_id = $2 order by created_at desc limit 1",
+      [job.id, job.suiJobObjectId],
+    );
+    if (!existing.rows[0]) {
+      throw new Error("Audit job could not be saved or loaded after conflict.");
+    }
+    return rowToAuditJob(existing.rows[0] as AuditJobRow);
   }
 
   private ensureSchema() {
@@ -1164,9 +1435,11 @@ function shouldUseDatabaseSsl(databaseUrl: string) {
 }
 
 function canClaimJob(job: LocalAuditJob) {
-  if (job.status === "queued") return true;
+  const retryReady =
+    !job.lockExpiresAt || new Date(job.lockExpiresAt).getTime() < Date.now();
+  if (job.status === "queued") return retryReady;
   if (job.status === "failed" && (job.attempts ?? 0) < (job.maxAttempts ?? 3)) {
-    return true;
+    return retryReady;
   }
   if (job.status !== "running" || !job.lockExpiresAt) return false;
   return new Date(job.lockExpiresAt).getTime() < Date.now();
@@ -1252,13 +1525,31 @@ function selectMovePackageRoot(packageRoots: string[], pathPrefix: string | unde
     if (exact) return exact;
     const nested = packageRoots.find((root) => root.startsWith(`${normalizedPrefix}/`));
     if (nested) return nested;
-    return normalizedPrefix;
+    const parent = packageRoots.find(
+      (root) => root !== "." && normalizedPrefix.startsWith(`${root}/`),
+    );
+    return parent;
   }
   if (packageRoots.length === 1) return packageRoots[0];
   const preferred = packageRoots.find((root) =>
     /^(move|contracts|contract|sources|sui|packages\/move|apps\/move)$/i.test(root),
   );
   return preferred ?? packageRoots[0];
+}
+
+function assertSourceContextScannable(sourceContext: SourceContext) {
+  if (!sourceContext.packageRoots?.length) {
+    throw new UserInputError("No Move.toml was found in this GitHub repository.");
+  }
+  if (!sourceContext.selectedRoot || !sourceContext.packageRoots.includes(sourceContext.selectedRoot)) {
+    throw new UserInputError("GitHub URL must point to a valid Move package root containing Move.toml.");
+  }
+  if (!sourceContext.totalMoveFileCount || !sourceContext.moveFileCount || sourceContext.files.length === 0) {
+    throw new UserInputError("No readable Move source files were found under the selected package root.");
+  }
+  if (!sourceContext.files.some((file) => /\bmodule\s+[A-Za-z0-9_:]+\s*\{/.test(file.content))) {
+    throw new UserInputError("Move source files were found, but no module declarations could be parsed.");
+  }
 }
 
 function pathIsUnderSelectedScope(
@@ -1655,7 +1946,12 @@ function createAuditReportFinalizer(config: RuntimeConfig): AuditReportFinalizer
       (change) =>
         change.type === "created" &&
         "objectType" in change &&
-        change.objectType === `${normalizeSuiObjectId(config.tuskscanPackageId!)}::audit::AuditReport`,
+        isMoveType(
+          change.objectType,
+          `${normalizeSuiObjectId(config.tuskscanPackageId!)}::audit::AuditReport`,
+          "audit",
+          "AuditReport",
+        ),
     );
     if (!reportObject || !("objectId" in reportObject)) {
       throw new Error("Report finalization succeeded but no AuditReport object was found.");
@@ -1665,6 +1961,18 @@ function createAuditReportFinalizer(config: RuntimeConfig): AuditReportFinalizer
       reportObjectId: reportObject.objectId,
     };
   };
+}
+
+function isMoveType(
+  value: unknown,
+  expectedType: string,
+  expectedModule: string,
+  expectedName: string,
+) {
+  return (
+    typeof value === "string" &&
+    (value === expectedType || value.endsWith(`::${expectedModule}::${expectedName}`))
+  );
 }
 
 async function runStoreAndFinalizeAudit(options: {
@@ -1678,6 +1986,11 @@ async function runStoreAndFinalizeAudit(options: {
   walrus: WalrusStore;
 }) {
   try {
+    console.info("[TuskScan:E2E] audit workflow started", {
+      auditId: options.job.id,
+      packageId: shortLog(options.job.packageId),
+      sourceUrl: options.job.sourceUrl ?? null,
+    });
     const audit = await runAuditWorkflow({
       criticAgent: options.criticAgent,
       findingAgent: options.findingAgent,
@@ -1685,6 +1998,7 @@ async function runStoreAndFinalizeAudit(options: {
         recall: async (snapshot) => {
           const recalled = await recallExploitMemories({
             context: buildMemoryRecallContext(snapshot),
+            limit: 20,
             store: options.memory,
           });
           return recalled.map((item): ExploitMemory => ({
@@ -1711,10 +2025,24 @@ async function runStoreAndFinalizeAudit(options: {
       sourceContext: options.job.sourceContext,
       snapshot: options.snapshot,
     });
+    console.info("[TuskScan:E2E] audit workflow finished", {
+      auditId: options.job.id,
+      findingCount: audit.findings.length,
+      riskScore: audit.report.riskScore,
+    });
+    console.info("[TuskScan:E2E] sandbox tests starting", {
+      auditId: options.job.id,
+      enabled: options.config.runMoveTests,
+    });
     const sandbox = await runSandboxMoveTests({
       config: options.config,
       report: audit.report,
       sourceContext: options.job.sourceContext,
+    });
+    console.info("[TuskScan:E2E] sandbox tests finished", {
+      auditId: options.job.id,
+      generatedTests: sandbox.generatedTests.length,
+      status: sandbox.run.status,
     });
     audit.report = {
       ...audit.report,
@@ -1730,6 +2058,7 @@ async function runStoreAndFinalizeAudit(options: {
       audit.report,
     );
 
+    console.info("[TuskScan:E2E] walrus store starting", { auditId: options.job.id });
     const stored = await storeAuditArtifacts({
       contents: {
         auditRunLog: [
@@ -1743,7 +2072,23 @@ async function runStoreAndFinalizeAudit(options: {
         publicReportMarkdown: audit.publicReportMarkdown,
         sourceContext: options.job.sourceContext ?? { source: "none" },
       },
+      onProgress: (event) => {
+        console.info("[TuskScan:E2E] walrus artifact", {
+          auditId: options.job.id,
+          ...event,
+        });
+      },
       store: options.walrus,
+    });
+    console.info("[TuskScan:E2E] walrus store finished", {
+      auditId: options.job.id,
+      findingsHash: shortLog(stored.artifacts.findings.contentHash),
+      reportHash: shortLog(stored.artifacts.privateReport.contentHash),
+    });
+    console.info("[TuskScan:E2E] sui finalize starting", {
+      auditId: options.job.id,
+      jobObjectId: shortLog(options.job.suiJobObjectId),
+      riskScore: audit.report.riskScore,
     });
     const finalized = await options.finalizer({
       artifacts: stored.artifacts,
@@ -1752,6 +2097,11 @@ async function runStoreAndFinalizeAudit(options: {
       packageSnapshotHash: stored.artifacts.packageSnapshot.contentHash,
       reportHash: stored.artifacts.privateReport.contentHash,
       riskScore: audit.report.riskScore,
+    });
+    console.info("[TuskScan:E2E] sui finalize finished", {
+      auditId: options.job.id,
+      digest: shortLog(finalized.digest),
+      reportObjectId: shortLog(finalized.reportObjectId),
     });
 
     options.job.artifacts = stored.artifacts;
@@ -2116,6 +2466,7 @@ function createLlmAuditAgents(config: RuntimeConfig): LlmAgentBundle | undefined
               severity: finding.severity,
               title: finding.title,
             })),
+            memories: input.memories.slice(0, 6),
             packageSummary: input.packageSummary,
             sourceSummary: input.sourceContext
               ? summarizeSourceContext(input.sourceContext)
@@ -2189,6 +2540,16 @@ async function callLlmJson(
 ): Promise<Record<string, unknown>> {
   const baseUrl = (config.llmBaseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
   const model = config.llmModel ?? "gpt-4.1-mini";
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${config.llmApiKey}`,
+    "content-type": "application/json",
+  };
+  if (baseUrl.includes("openrouter.ai")) {
+    headers["X-OpenRouter-Title"] = config.llmTitle ?? "TuskScan";
+    if (config.llmReferer) {
+      headers["HTTP-Referer"] = config.llmReferer;
+    }
+  }
   const response = await fetch(`${baseUrl}/chat/completions`, {
     body: JSON.stringify({
       messages: [
@@ -2199,10 +2560,7 @@ async function callLlmJson(
       response_format: { type: "json_object" },
       temperature: 0.1,
     }),
-    headers: {
-      authorization: `Bearer ${config.llmApiKey}`,
-      "content-type": "application/json",
-    },
+    headers,
     method: "POST",
   });
   if (!response.ok) {
@@ -2383,8 +2741,14 @@ function stripJsonFence(value: string) {
 function publicJob(job: LocalAuditJob) {
   return {
     createdAt: job.createdAt,
+    attempts: job.attempts,
     finalizedDigest: job.finalizedDigest,
     id: job.id,
+    lastError: job.lastError,
+    lockedAt: job.lockedAt,
+    lockedBy: job.lockedBy,
+    lockExpiresAt: job.lockExpiresAt,
+    maxAttempts: job.maxAttempts,
     network: job.network,
     packageId: job.packageId,
     packageSummary: job.packageSummary,
@@ -2406,6 +2770,69 @@ function publicJob(job: LocalAuditJob) {
     suiJobObjectId: job.suiJobObjectId,
     suiTransactionDigest: job.suiTransactionDigest,
   };
+}
+
+async function readAuditArtifact(options: {
+  artifactName: AuditArtifactName;
+  job: LocalAuditJob;
+  store: WalrusStore;
+}) {
+  const pointer = options.job.artifacts?.[options.artifactName];
+  if (pointer) {
+    const content = await options.store.readArtifact(pointer.blobId);
+    if (content !== undefined) {
+      return {
+        content,
+        contentType: pointer.contentType,
+        filename: pointer.name,
+      };
+    }
+  }
+
+  return fallbackAuditArtifact(options.job, options.artifactName);
+}
+
+function fallbackAuditArtifact(job: LocalAuditJob, artifactName: AuditArtifactName) {
+  if (artifactName === "publicReport" && job.publicReportMarkdown) {
+    return {
+      content: job.publicReportMarkdown,
+      contentType: "text/markdown",
+      filename: "public-report.md",
+    };
+  }
+  if (artifactName === "privateReport" && job.privateReportMarkdown) {
+    return {
+      content: job.privateReportMarkdown,
+      contentType: "text/markdown",
+      filename: "private-report.md",
+    };
+  }
+  if (artifactName === "findings" && job.report) {
+    return jsonDownload("findings.json", job.report.findings);
+  }
+  if (artifactName === "sourceContext" && job.sourceContext) {
+    return jsonDownload("source-context.json", job.sourceContext);
+  }
+  if (artifactName === "auditRunLog") {
+    return jsonDownload("audit-run-log.json", [
+      { at: job.createdAt, step: "created", status: "paid" },
+      { at: job.completedAt ?? new Date().toISOString(), step: job.status, status: job.status },
+    ]);
+  }
+  return undefined;
+}
+
+function jsonDownload(filename: string, value: unknown) {
+  return {
+    content: JSON.stringify(value, null, 2),
+    contentType: "application/json",
+    filename,
+  };
+}
+
+function parseAuditArtifactName(value: string): AuditArtifactName | undefined {
+  const decoded = decodeURIComponent(value);
+  return auditArtifactNames.find((name) => name.toLowerCase() === decoded.toLowerCase());
 }
 
 function readSession(
@@ -2516,6 +2943,28 @@ function sendJson(response: ServerResponse, status: number, value: unknown) {
   response.end(JSON.stringify(value));
 }
 
+function sendContent(
+  response: ServerResponse,
+  status: number,
+  content: string,
+  options: { contentType: string; filename: string },
+) {
+  response.writeHead(status, {
+    "content-disposition": `inline; filename="${options.filename.replace(/"/g, "")}"`,
+    "content-type": `${options.contentType}; charset=utf-8`,
+  });
+  response.end(content);
+}
+
+function shortLog(value: string) {
+  if (value.length <= 18) return value;
+  return `${value.slice(0, 8)}...${value.slice(-6)}`;
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unexpected error.";
+}
+
 async function readJson<T>(request: IncomingMessage) {
   const chunks: Buffer[] = [];
   for await (const chunk of request) {
@@ -2530,9 +2979,22 @@ async function createAuditId(transactionDigest: string, snapshotHash: string) {
   return `audit-${(await sha256Hex(`${transactionDigest}:${snapshotHash}`)).slice(2, 14)}`;
 }
 
+function sleep(ms: number) {
+  return new Promise<void>((resolveTimeout) => {
+    setTimeout(resolveTimeout, ms);
+  });
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.env.PORT ?? 8787);
-  createTuskscanApiServer().listen(port, () => {
+  const config = loadRuntimeConfig();
+  assertRuntimeRequirements(config);
+  createTuskscanApiServer({ config }).listen(port, () => {
     console.log(`TuskScan API listening on http://localhost:${port}`);
+    console.log(
+      config.processJobsInApi
+        ? "TuskScan API job processing enabled; API may claim audit jobs."
+        : "TuskScan API route-level job processing disabled; the API package queue worker claims database jobs.",
+    );
   });
 }

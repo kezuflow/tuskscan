@@ -150,43 +150,6 @@ importers:
         specifier: 5.9.2
         version: 5.9.2
 
-  apps/worker:
-    dependencies:
-      '@mysten/sui':
-        specifier: ^2.17.0
-        version: 2.17.0(typescript@5.9.2)
-      '@repo/audit-core':
-        specifier: workspace:*
-        version: link:../../packages/audit-core
-      '@repo/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
-      '@repo/storage':
-        specifier: workspace:*
-        version: link:../../packages/storage
-      '@repo/sui-integration':
-        specifier: workspace:*
-        version: link:../../packages/sui-integration
-    devDependencies:
-      '@repo/eslint-config':
-        specifier: workspace:*
-        version: link:../../packages/eslint-config
-      '@repo/typescript-config':
-        specifier: workspace:*
-        version: link:../../packages/typescript-config
-      '@types/node':
-        specifier: ^22.15.3
-        version: 22.15.3
-      eslint:
-        specifier: ^9.39.1
-        version: 9.39.1(jiti@2.7.0)
-      tsx:
-        specifier: ^4.21.0
-        version: 4.22.4
-      typescript:
-        specifier: 5.9.2
-        version: 5.9.2
-
   packages/audit-core:
     dependencies:
       '@repo/shared':

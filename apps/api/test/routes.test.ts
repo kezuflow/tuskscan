@@ -7,7 +7,7 @@ import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import type { NormalizedPackageSnapshot, SourceContext } from "@repo/shared";
 import { InMemoryExploitMemoryStore, InMemoryWalrusStore } from "@repo/storage";
 
-import { InMemoryAuditJobStore, createTuskscanApiServer } from "../src/index.ts";
+import { InMemoryAuditJobStore, createTuskscanApiServer, loadRuntimeConfig } from "../src/index.ts";
 
 const fixtureSnapshot: NormalizedPackageSnapshot = {
   fetchedAt: "2026-06-12T00:00:00.000Z",
@@ -44,13 +44,31 @@ const fixtureSnapshot: NormalizedPackageSnapshot = {
   source: "sui-normalized-modules",
 };
 
+test("OpenRouter API key configures OpenAI-compatible LLM defaults", () => {
+  const config = loadRuntimeConfig({
+    OPENROUTER_API_KEY: "sk-or-test",
+  });
+
+  assert.equal(config.llmApiKey, "sk-or-test");
+  assert.equal(config.llmBaseUrl, "https://openrouter.ai/api/v1");
+  assert.equal(config.llmModel, "openai/gpt-4.1-mini");
+  assert.equal(config.llmTitle, "TuskScan");
+});
+
 test("prepare resolves a repository URL with published package metadata", async () => {
   const { baseUrl, close } = await startTestServer({
     sourceContext: {
       branch: "main",
       digest: "source-digest",
       fetchedAt: "2026-06-12T00:00:00.000Z",
-      files: [],
+      files: [
+        {
+          content:
+            "module demo::vault { public entry fun withdraw_all(treasury: &mut Treasury) {} struct Treasury has key, store { id: UID } }",
+          path: "move/demo-package-a/sources/vault.move",
+          sizeBytes: 118,
+        },
+      ],
       moveFileCount: 1,
       packageRoots: ["move/demo-package-a"],
       pathPrefix: "move/demo-package-a",
@@ -112,6 +130,35 @@ test("prepare accepts repository URLs without published package metadata", async
   }
 });
 
+test("prepare rejects GitHub URLs that do not resolve to a Move package", async () => {
+  const { baseUrl, close } = await startTestServer({
+    sourceContext: {
+      branch: "main",
+      digest: "0xabcdef1234567890",
+      fetchedAt: "2026-06-12T00:00:00.000Z",
+      files: [],
+      moveFileCount: 0,
+      packageRoots: [],
+      pathPrefix: "docs",
+      selectedRoot: undefined,
+      source: "github",
+      totalMoveFileCount: 0,
+      url: "https://github.com/example/repo/tree/main/docs",
+    },
+  });
+  try {
+    const response = await postJson(`${baseUrl}/api/audits/prepare`, {
+      sourceUrl: "https://github.com/example/repo/tree/main/docs",
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 400);
+    assert.match(body.error, /No Move\.toml/);
+  } finally {
+    await close();
+  }
+});
+
 test("prepare rejects unsupported source URLs", async () => {
   const { baseUrl, close } = await startTestServer();
   try {
@@ -150,6 +197,17 @@ test("audit lifecycle creates, reads, reports, and verifies artifacts", async ()
     assert.equal(create.status, 202);
     assert.equal(created.status, "completed");
 
+    const duplicateCreate = await postJson(`${baseUrl}/api/audits`, {
+      packageId: "0x1234",
+      payer,
+      suiJobObjectId: "0xbeef",
+      suiTransactionDigest: "verified-digest",
+    });
+    const duplicate = await duplicateCreate.json();
+    assert.equal(duplicateCreate.status, 202);
+    assert.equal(duplicate.auditId, created.auditId);
+    assert.equal(duplicate.status, "completed");
+
     const audit = await (await fetch(`${baseUrl}/api/audits/${created.auditId}`)).json();
     assert.equal(audit.report, undefined);
     assert.equal(audit.publicReport.findingCount > 0, true);
@@ -159,6 +217,18 @@ test("audit lifecycle creates, reads, reports, and verifies artifacts", async ()
     ).json();
     assert.equal(publicReport.private, false);
     assert.equal(publicReport.report.findings.length <= 3, true);
+
+    const publicArtifact = await fetch(
+      `${baseUrl}/api/audits/${created.auditId}/artifacts/publicReport`,
+    );
+    assert.equal(publicArtifact.status, 200);
+    assert.match(publicArtifact.headers.get("content-type") ?? "", /text\/markdown/);
+    assert.match(await publicArtifact.text(), /TuskScan/i);
+
+    const lockedPrivateArtifact = await fetch(
+      `${baseUrl}/api/audits/${created.auditId}/artifacts/privateReport`,
+    );
+    assert.equal(lockedPrivateArtifact.status, 401);
 
     const challenge = await (
       await postJson(`${baseUrl}/api/auth/challenge`, { address: payer })
@@ -180,6 +250,16 @@ test("audit lifecycle creates, reads, reports, and verifies artifacts", async ()
     ).json();
     assert.equal(privateReport.private, true);
 
+    const privateArtifact = await fetch(
+      `${baseUrl}/api/audits/${created.auditId}/artifacts/privateReport`,
+      {
+        headers: { authorization: `Bearer ${session.token}` },
+      },
+    );
+    assert.equal(privateArtifact.status, 200);
+    assert.match(privateArtifact.headers.get("content-type") ?? "", /text\/markdown/);
+    assert.match(await privateArtifact.text(), /TuskScan/i);
+
     const walletAudits = await (
       await fetch(`${baseUrl}/api/audits?wallet=${payer}`, {
         headers: { authorization: `Bearer ${session.token}` },
@@ -197,6 +277,61 @@ test("audit lifecycle creates, reads, reports, and verifies artifacts", async ()
       ),
       true,
     );
+  } finally {
+    await close();
+  }
+});
+
+test("paid source-only audits process without fetching a Sui package object", async () => {
+  const keypair = Ed25519Keypair.generate();
+  const payer = keypair.toSuiAddress();
+  const { baseUrl, close } = await startTestServer({
+    failFetchPackage: true,
+    sourceContext: {
+      branch: "main",
+      digest: "0xabcdef1234567890",
+      fetchedAt: "2026-06-12T00:00:00.000Z",
+      files: [
+        {
+          content:
+            "module demo::vault { public entry fun withdraw_all(treasury: &mut Treasury) {} struct Treasury has key, store { id: UID } }",
+          path: "move/demo-package-a/sources/vault.move",
+          sizeBytes: 118,
+        },
+      ],
+      moveFileCount: 1,
+      packageRoots: ["move/demo-package-a"],
+      pathPrefix: "move/demo-package-a",
+      selectedRoot: "move/demo-package-a",
+      source: "github",
+      totalMoveFileCount: 1,
+      url: "https://github.com/example/repo/tree/main/move/demo-package-a",
+    },
+  });
+  try {
+    const prepare = await postJson(`${baseUrl}/api/audits/prepare`, {
+      sourceUrl: "https://github.com/example/repo/tree/main/move/demo-package-a",
+    });
+    const prepared = await prepare.json();
+    assert.equal(prepare.status, 200);
+    assert.match(prepared.packageSummary.packageId, /^github:example\/repo\/move\/demo-package-a@main#/);
+
+    const create = await postJson(`${baseUrl}/api/audits`, {
+      packageId: prepared.packageSummary.packageId,
+      payer,
+      sourceUrl: prepared.sourceSummary.url,
+      suiJobObjectId: "0xbeef",
+      suiTransactionDigest: "verified-digest",
+    });
+    const created = await create.json();
+
+    assert.equal(create.status, 202);
+    assert.equal(created.status, "completed");
+
+    const audit = await (await fetch(`${baseUrl}/api/audits/${created.auditId}`)).json();
+    assert.equal(audit.status, "completed");
+    assert.equal(audit.packageId, prepared.packageSummary.packageId);
+    assert.equal(audit.sourceSummary.url, prepared.sourceSummary.url);
   } finally {
     await close();
   }
@@ -262,21 +397,63 @@ test("expired audit job locks can be reclaimed", async () => {
   assert.equal(claimed?.lockedBy, "worker-b");
 });
 
-async function startTestServer(options: { sourceContext?: SourceContext } = {}) {
+test("failed audit jobs wait for retry cooldown before being claimed again", async () => {
+  const store = new InMemoryAuditJobStore();
+  await store.save({
+    createdAt: "2026-06-12T00:00:00.000Z",
+    id: "audit-retry",
+    network: "testnet",
+    packageId: "0x1234",
+    packageSummary: {
+      fetchedAt: "2026-06-12T00:00:00.000Z",
+      functionCount: 1,
+      moduleCount: 1,
+      network: "testnet",
+      packageDigest: "fixture-digest",
+      packageId: "0x1234",
+      structCount: 1,
+    },
+    payer: "0x8",
+    snapshotHash: "snapshot-hash",
+    status: "queued",
+    suiJobObjectId: "0xbeef",
+    suiTransactionDigest: "verified-digest",
+  });
+
+  const claimed = await store.claimJob("audit-retry", "worker-a", 60_000);
+  assert.equal(claimed?.lockedBy, "worker-a");
+  await store.failJob(claimed!, "worker-a", new Error("rate limited"));
+
+  assert.deepEqual(await store.listClaimableIds(10), []);
+  assert.equal(await store.claimJob("audit-retry", "worker-b", 60_000), undefined);
+});
+
+async function startTestServer(
+  options: { failFetchPackage?: boolean; sourceContext?: SourceContext } = {},
+) {
   const server = createTuskscanApiServer({
     config: {
       environment: "localhost",
       network: "testnet",
+      memwalTimeoutMs: 120_000,
+      memwalWaitForRemember: true,
+      processJobsInApi: false,
       priceMist: "1000000",
       tuskscanPackageId:
         "0x0000000000000000000000000000000000000000000000000000000000000009",
+      walrusWriteTimeoutMs: 120_000,
     },
     auditStore: new InMemoryAuditJobStore(),
-    fetchPackage: async ({ network, packageId }) => ({
-      ...fixtureSnapshot,
-      network,
-      packageId,
-    }),
+    fetchPackage: async ({ network, packageId }) => {
+      if (options.failFetchPackage) {
+        throw new Error("fetchPackage should not be called for source-only audits");
+      }
+      return {
+        ...fixtureSnapshot,
+        network,
+        packageId,
+      };
+    },
     fetchSourceContext: async (sourceUrl) =>
       sourceUrl && options.sourceContext
         ? { ...options.sourceContext, url: sourceUrl }

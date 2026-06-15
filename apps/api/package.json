@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx src/index.ts",
+    "dev": "tsx src/dev.ts",
+    "dev:http": "tsx src/index.ts",
+    "dev:worker": "tsx src/worker.ts",
     "build": "tsc --noEmit",
     "db:generate": "prisma generate --schema prisma/schema.prisma",
     "db:apply": "node scripts/apply-schema.mjs",

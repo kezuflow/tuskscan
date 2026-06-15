@@ -1,9 +1,0 @@
-{
-  "extends": "@repo/typescript-config/base.json",
-  "compilerOptions": {
-    "strictNullChecks": true,
-    "types": ["node"]
-  },
-  "include": ["src"],
-  "exclude": ["node_modules", "dist"]
-}

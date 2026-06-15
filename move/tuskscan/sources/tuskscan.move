@@ -108,7 +108,7 @@ module tuskscan::audit {
             price_paid,
         });
         transfer::public_transfer(payment, config.operator);
-        transfer::transfer(job, tx_context::sender(ctx));
+        transfer::share_object(job);
     }
 
     entry fun set_price(_: &OperatorCap, config: &mut AuditConfig, price_mist: u64) {

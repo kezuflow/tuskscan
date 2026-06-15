@@ -136,7 +136,7 @@ test("optionally fetches a known Sui testnet package", async (context) => {
 
 function mockSuiPaymentRpc(options: { operatorWasPaid: boolean }) {
   const previousFetch = globalThis.fetch;
-  const contractPackageId = normalizeSuiObjectId("0x7");
+  const originalTypePackageId = normalizeSuiObjectId("0x70");
   const jobObjectId = normalizeSuiObjectId("0xbeef");
   const operatorAddress = normalizeSuiObjectId("0x9");
   const packageId = "github:example/repo/move/package#0xabc";
@@ -159,7 +159,7 @@ function mockSuiPaymentRpc(options: { operatorWasPaid: boolean }) {
         objectChanges: [
           {
             objectId: jobObjectId,
-            objectType: `${contractPackageId}::audit::AuditJob`,
+            objectType: `${originalTypePackageId}::audit::AuditJob`,
             type: "created",
           },
         ],
@@ -176,10 +176,10 @@ function mockSuiPaymentRpc(options: { operatorWasPaid: boolean }) {
               price_paid: "1000000",
               status: 1,
             },
-            type: `${contractPackageId}::audit::AuditJob`,
+            type: `${originalTypePackageId}::audit::AuditJob`,
           },
           objectId: jobObjectId,
-          owner: { AddressOwner: payer },
+          owner: { Shared: { initial_shared_version: 1 } },
         },
       });
     }

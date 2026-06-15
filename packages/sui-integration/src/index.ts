@@ -238,7 +238,7 @@ export async function verifyAuditJobPayment(options: {
     return (
       change.type === "created" &&
       normalizeOptionalObjectId(String(change.objectId ?? "")) === jobObjectId &&
-      change.objectType === expectedJobType
+      isMoveType(change.objectType, expectedJobType, "audit", "AuditJob")
     );
   });
   if (!createdJob) {
@@ -250,11 +250,11 @@ export async function verifyAuditJobPayment(options: {
     { showContent: true, showOwner: true },
   ]);
   const content = job.data?.content;
-  if (content?.type !== expectedJobType) {
+  if (!content || !isMoveType(content.type, expectedJobType, "audit", "AuditJob")) {
     throw new SuiAuditVerificationError("AuditJob object has unexpected type.");
   }
-  if (normalizeOptionalObjectId(readOwnerAddress(job.data?.owner)) !== payer) {
-    throw new SuiAuditVerificationError("AuditJob object is not owned by payer.");
+  if (!isSharedOwner(job.data?.owner)) {
+    throw new SuiAuditVerificationError("AuditJob object is not shared.");
   }
 
   const fields = content.fields ?? {};
@@ -376,6 +376,20 @@ function readOwnerAddress(owner: unknown) {
     return String((owner as { AddressOwner?: unknown }).AddressOwner);
   }
   return undefined;
+}
+
+function isSharedOwner(owner: unknown) {
+  return Boolean(owner && typeof owner === "object" && "Shared" in owner);
+}
+
+function isMoveType(
+  value: unknown,
+  expectedType: string,
+  expectedModule: string,
+  expectedName: string,
+) {
+  if (typeof value !== "string") return false;
+  return value === expectedType || value.endsWith(`::${expectedModule}::${expectedName}`);
 }
 
 function isSuiCoinType(value: unknown) {

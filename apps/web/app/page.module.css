@@ -44,11 +44,19 @@
   place-items: center;
   border: 1px solid #5d9b4d;
   border-radius: 4px;
-  background: #14200f;
+  background: #0b0b0a;
   color: #8ed06c;
   font-size: 11px;
   font-weight: 800;
+  overflow: hidden;
   box-shadow: 0 0 14px rgba(119, 187, 91, 0.18);
+}
+
+.logoMark img {
+  display: block;
+  width: 21px;
+  height: 21px;
+  object-fit: contain;
 }
 
 .sidebarBrand strong {
@@ -124,10 +132,23 @@
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   color: #7fca60;
   font-size: 15px;
   font-weight: 800;
   line-height: 1;
+}
+
+.brand img {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border: 1px solid #3f6f34;
+  border-radius: 3px;
+  background: #0b0b0a;
+  object-fit: contain;
 }
 
 .topStatus {

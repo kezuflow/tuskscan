@@ -8,6 +8,7 @@ import {
   useSuiClient,
 } from "@mysten/dapp-kit";
 import { Transaction } from "@mysten/sui/transactions";
+import Image from "next/image";
 import {
   type FormEvent,
   type MouseEvent,
@@ -719,7 +720,9 @@ export default function Home() {
       <div className={styles.crtOverlay} />
       <aside className={styles.sidebar} aria-label="TuskScan navigation">
         <div className={styles.sidebarBrand}>
-          <span className={styles.logoMark}>TS</span>
+          <span className={styles.logoMark}>
+            <Image alt="" aria-hidden="true" height={21} src="/tusk-logo.webp" width={21} />
+          </span>
           <div>
             <strong>&gt; {bannerText}</strong>
             <span>Move audit workbench</span>
@@ -740,7 +743,10 @@ export default function Home() {
       </aside>
       <header className={styles.topBar}>
         <div>
-          <span className={styles.brand}>&gt; TUSKSCAN</span>
+          <span className={styles.brand}>
+            <Image alt="" aria-hidden="true" height={18} src="/tusk-logo.webp" width={18} />
+            &gt; TUSKSCAN
+          </span>
           <span className={styles.topStatus}>
             [PROJECT: SUI_MOVE] [STATUS: {stateLabel(state).toUpperCase()}]
           </span>

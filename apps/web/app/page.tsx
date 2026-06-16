@@ -186,7 +186,9 @@ type ParsedCommand = {
   target?: string;
 };
 
-const apiBase = process.env.NEXT_PUBLIC_TUSKSCAN_API_URL ?? "http://localhost:8787";
+const configuredApiBase = process.env.NEXT_PUBLIC_TUSKSCAN_API_URL ?? "http://localhost:8787";
+const productionApiBase = "https://api.tuskscan.xyz";
+const localHosts = new Set(["localhost", "127.0.0.1", "::1"]);
 const contractPackageId = process.env.NEXT_PUBLIC_TUSKSCAN_PACKAGE_ID;
 const configObjectId = process.env.NEXT_PUBLIC_TUSKSCAN_CONFIG_ID;
 const network = process.env.NEXT_PUBLIC_TUSKSCAN_NETWORK === "mainnet" ? "mainnet" : "testnet";
@@ -194,6 +196,19 @@ const suiExplorerBase =
   network === "mainnet" ? "https://suivision.xyz" : "https://testnet.suivision.xyz";
 const zeroSuiAddress = "0x0000000000000000000000000000000000000000000000000000000000000000";
 const bannerText = "TUSKSCAN";
+
+function resolveApiBase() {
+  if (typeof window === "undefined") return configuredApiBase;
+  const currentHost = window.location.hostname;
+  const isLocalPage = localHosts.has(currentHost);
+  const configuredIsLocal =
+    configuredApiBase.includes("localhost") ||
+    configuredApiBase.includes("127.0.0.1") ||
+    configuredApiBase.includes("[::1]");
+
+  if (!isLocalPage && configuredIsLocal) return productionApiBase;
+  return configuredApiBase;
+}
 
 export default function Home() {
   const account = useCurrentAccount();
@@ -1449,6 +1464,7 @@ function suiTransactionUrl(digest: string) {
 }
 
 function artifactDownloadUrl(auditId: string, artifactName: string) {
+  const apiBase = resolveApiBase();
   return `${apiBase}/api/audits/${encodeURIComponent(auditId)}/artifacts/${encodeURIComponent(artifactName)}`;
 }
 
@@ -1550,6 +1566,7 @@ function sanitizeApiBody(body: unknown) {
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   let response: Response;
+  const apiBase = resolveApiBase();
   try {
     debugE2E("api-request", {
       body: sanitizeApiBody(body),
@@ -1584,6 +1601,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function getJson<T>(path: string): Promise<T> {
+  const apiBase = resolveApiBase();
   debugE2E("api-request", { method: "GET", path });
   const response = await fetch(`${apiBase}${path}`);
   debugE2E("api-response", {
@@ -1599,6 +1617,7 @@ async function getJson<T>(path: string): Promise<T> {
 }
 
 async function getJsonWithAuth<T>(path: string, token: string): Promise<T> {
+  const apiBase = resolveApiBase();
   debugE2E("api-request", { auth: "bearer:[redacted]", method: "GET", path });
   const response = await fetch(`${apiBase}${path}`, {
     headers: { authorization: `Bearer ${token}` },

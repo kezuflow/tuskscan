@@ -861,7 +861,7 @@ export default function Home() {
         <section className={styles.bootPanel} id="scan" aria-label="TuskScan command center">
           <div className={styles.arcadeMasthead}>
             <div className={styles.brandPlate}>
-              <h1 className={styles.banner}>{bannerText} Workbench</h1>
+              <h1 className={styles.banner}>Workbench</h1>
             </div>
           </div>
 

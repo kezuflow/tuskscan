@@ -19,25 +19,23 @@ jobs:
       - name: Check deploy secrets
         id: preflight
         env:
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-          VPS_USER: ${{ secrets.VPS_USER }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
         run: |
-          if [ -n "$VPS_HOST" ] && [ -n "$VPS_USER" ] && [ -n "$VPS_SSH_KEY" ]; then
+          if [ -n "$VPS_SSH_KEY" ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "VPS deploy secrets are not configured; skipping SSH deploy."
+            echo "VPS_SSH_KEY is not configured; skipping SSH deploy."
           fi
 
       - name: Deploy over SSH
         if: steps.preflight.outputs.ready == 'true'
         uses: appleboy/ssh-action@v1.2.2
         with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
+          host: 134.209.73.193
+          username: root
           key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_SSH_PORT || 22 }}
+          port: 22
           script_stop: true
           script: |
             set -euo pipefail

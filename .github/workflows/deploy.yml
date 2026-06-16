@@ -1,0 +1,52 @@
+name: Deploy VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: production-vps
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy to DigitalOcean VPS
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check deploy secrets
+        id: preflight
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          if [ -n "$VPS_HOST" ] && [ -n "$VPS_USER" ] && [ -n "$VPS_SSH_KEY" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "VPS deploy secrets are not configured; skipping SSH deploy."
+          fi
+
+      - name: Deploy over SSH
+        if: steps.preflight.outputs.ready == 'true'
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT || 22 }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+            if [ ! -f /opt/tuskscan/app/scripts/deploy-vps.sh ]; then
+              rm -rf /opt/tuskscan/app
+              mkdir -p /opt/tuskscan
+              git clone --branch main https://github.com/kezuflow/tuskscan.git /opt/tuskscan/app
+            fi
+            APP_DIR=/opt/tuskscan/app \
+              BRANCH=main \
+              REPO_URL=https://github.com/kezuflow/tuskscan.git \
+              bash /opt/tuskscan/app/scripts/deploy-vps.sh

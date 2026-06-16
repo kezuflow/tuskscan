@@ -513,6 +513,128 @@
   text-transform: uppercase;
 }
 
+.panelActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.panelActions button {
+  min-height: 28px;
+  border: 1px solid #4f7b3c;
+  border-radius: 2px;
+  background: #171613;
+  color: #8ed06c;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.panelActions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.panelActions button:hover:not(:disabled) {
+  background: #1d2a17;
+}
+
+.auditHistoryPanel {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+  border: 1px solid #2b2a26;
+  background: #151410;
+}
+
+.auditHistoryHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #2b2a26;
+  padding: 10px 12px;
+}
+
+.auditHistoryHeader span {
+  color: #8ed06c;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.auditHistoryHeader small,
+.auditHistoryEmpty {
+  color: #8a8175;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.auditHistoryEmpty {
+  padding: 0 12px 12px;
+}
+
+.auditHistoryList {
+  display: grid;
+}
+
+.auditHistoryList button {
+  display: grid;
+  grid-template-columns: 118px minmax(220px, 1fr) 86px minmax(160px, 0.74fr);
+  gap: 12px;
+  align-items: start;
+  min-width: 0;
+  border: 0;
+  border-top: 1px solid #25241f;
+  background: #171613;
+  color: #d6cfb9;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 9px 12px;
+  text-align: left;
+}
+
+.auditHistoryList button:first-child {
+  border-top: 0;
+}
+
+.auditHistoryList button:hover,
+.auditHistoryActive {
+  background: #1e2519 !important;
+}
+
+.auditHistoryList span,
+.auditHistoryList em {
+  color: #8a8175;
+  font-style: normal;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.auditHistoryList strong,
+.auditHistoryList small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auditHistoryList strong {
+  color: #d6cfb9;
+  font-weight: 800;
+}
+
+.auditHistoryList small {
+  color: #a9a092;
+}
+
 .timeline {
   display: grid;
   gap: 8px;

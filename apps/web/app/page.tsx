@@ -154,10 +154,12 @@ type AuditJob = {
   maxAttempts?: number;
   packageId?: string;
   publicReport?: {
+    createdAt?: string;
     findingCount: number;
     riskScore: number;
     status: string;
     summary: string;
+    visibility?: string;
   };
   report?: AuditReport;
   reportObjectId?: string;
@@ -166,6 +168,10 @@ type AuditJob = {
   status: string;
   suiJobObjectId: string;
   suiTransactionDigest: string;
+};
+
+type AuditListResponse = {
+  audits: AuditJob[];
 };
 
 type ReportResponse = {
@@ -216,6 +222,8 @@ export default function Home() {
   const signAndExecute = useSignAndExecuteTransaction();
   const signPersonalMessage = useSignPersonalMessage();
   const [audit, setAudit] = useState<AuditJob | null>(null);
+  const [auditHistory, setAuditHistory] = useState<AuditJob[]>([]);
+  const [auditHistoryLoading, setAuditHistoryLoading] = useState(false);
   const [command, setCommand] = useState("");
   const [error, setError] = useState("");
   const [packageId, setPackageId] = useState("");
@@ -650,6 +658,88 @@ export default function Home() {
     throw new Error("Audit processing is still running. Load your audits again in a moment.");
   }
 
+  async function loadAuditHistory() {
+    if (!account) {
+      const message = "Connect the payer wallet to load your audit history.";
+      setError(message);
+      appendLogs([{ section: "AUTH", text: message, tone: "warning" }]);
+      return;
+    }
+
+    setError("");
+    setAuditHistoryLoading(true);
+    appendLogs([{ section: "REPORT", text: "Loading wallet audit history from TuskScan API." }]);
+    try {
+      const token = await getPrivateReportSession(account.address);
+      const response = await getJsonWithAuth<AuditListResponse>(
+        `/api/audits?wallet=${encodeURIComponent(account.address)}`,
+        token,
+      );
+      setAuditHistory(response.audits);
+      appendLogs([
+        {
+          section: "REPORT",
+          text: `Loaded ${response.audits.length} audit${response.audits.length === 1 ? "" : "s"} for this wallet.`,
+          tone: "success",
+        },
+      ]);
+    } catch (caught) {
+      const message = errorMessage(caught);
+      setError(message);
+      appendLogs([{ section: "REPORT", text: message, tone: "error" }]);
+    } finally {
+      setAuditHistoryLoading(false);
+    }
+  }
+
+  async function loadAuditFromHistory(job: AuditJob) {
+    setError("");
+    setAudit(job);
+    setPackageId(job.packageId ?? "");
+    setPrepared(null);
+    setPrivateReport(false);
+    setSourceUrl(job.sourceUrl ?? job.sourceSummary?.url ?? "");
+    setState(auditStateFromStatus(job.status));
+    appendLogs([
+      {
+        section: "REPORT",
+        text: `Loaded audit ${shorten(job.id)} with status ${job.status}.`,
+        tone: job.status === "failed" ? "warning" : "success",
+      },
+    ]);
+
+    if (job.status !== "completed") {
+      return;
+    }
+    if (!account) {
+      setError("Connect the payer wallet to unlock the completed audit report.");
+      return;
+    }
+
+    try {
+      const token = await getPrivateReportSession(account.address);
+      const reportPayload = await getJsonWithAuth<ReportResponse>(
+        `/api/audits/${job.id}/report`,
+        token,
+      );
+      setPrivateReport(reportPayload.private);
+      setAudit({ ...job, report: reportPayload.report });
+      setState("complete");
+      appendLogs([
+        {
+          section: "REPORT",
+          text: `Audit report opened: risk ${reportPayload.report.riskScore}/100, ${reportPayload.report.findings.length} findings.`,
+          tone: "success",
+        },
+        ...agentReportLogs(reportPayload.report, job),
+      ]);
+    } catch (caught) {
+      const message = errorMessage(caught);
+      setError(message);
+      appendLogs([{ section: "REPORT", text: message, tone: "error" }]);
+    }
+  }
+
   async function openArtifactDownload(row: (typeof proofRows)[number]) {
     if (!row.downloadHref) return;
     const targetWindow = window.open("about:blank", "_blank");
@@ -1026,7 +1116,54 @@ export default function Home() {
         <section className={styles.terminalPanel} id="audits">
           <div className={styles.panelHeader}>
             <h2>[ AUDITS / REPORT_OUTPUT ]</h2>
-            <span>{privateReport ? "PRIVATE_REPORT_UNLOCKED" : "PUBLIC_SUMMARY"}</span>
+            <div className={styles.panelActions}>
+              <span>{privateReport ? "PRIVATE_REPORT_UNLOCKED" : "PUBLIC_SUMMARY"}</span>
+              <button disabled={auditHistoryLoading} onClick={() => void loadAuditHistory()} type="button">
+                {auditHistoryLoading ? "[loading]" : "[load audits]"}
+              </button>
+            </div>
+          </div>
+
+          <div className={styles.auditHistoryPanel}>
+            <div className={styles.auditHistoryHeader}>
+              <span>Wallet audit history</span>
+              <small>
+                {account
+                  ? auditHistory.length
+                    ? `${auditHistory.length} loaded`
+                    : "load audits to view previous runs"
+                  : "connect wallet to load audits"}
+              </small>
+            </div>
+            {auditHistory.length ? (
+              <div className={styles.auditHistoryList}>
+                {auditHistory.map((item) => (
+                  <button
+                    className={item.id === audit?.id ? styles.auditHistoryActive : undefined}
+                    key={item.id}
+                    onClick={() => void loadAuditFromHistory(item)}
+                    type="button"
+                  >
+                    <span>{auditCreatedLabel(item.createdAt)}</span>
+                    <strong>{item.sourceUrl ?? item.sourceSummary?.url ?? shorten(item.packageId ?? item.id)}</strong>
+                    <em>{item.status}</em>
+                    <small>
+                      {item.publicReport
+                        ? `risk ${item.publicReport.riskScore}/100 / ${item.publicReport.findingCount} findings`
+                        : item.lastError
+                          ? item.lastError
+                          : "report pending"}
+                    </small>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className={styles.auditHistoryEmpty}>
+                {account
+                  ? "No audit history loaded yet."
+                  : "Connect the payer wallet to load previous audits."}
+              </p>
+            )}
           </div>
 
           {audit?.report ? (
@@ -1463,6 +1600,28 @@ function suiTransactionUrl(digest: string) {
 function artifactDownloadUrl(auditId: string, artifactName: string) {
   const apiBase = resolveApiBase();
   return `${apiBase}/api/audits/${encodeURIComponent(auditId)}/artifacts/${encodeURIComponent(artifactName)}`;
+}
+
+function auditStateFromStatus(status: string): AuditState {
+  if (status === "completed") return "complete";
+  if (status === "failed") return "failed";
+  if (status === "prepared") return "prepared";
+  if (status === "paid" || status === "queued" || status === "running") return "running";
+  return "idle";
+}
+
+function auditCreatedLabel(value: string | undefined) {
+  if (!value) return "unknown";
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      month: "short",
+    }).format(new Date(value));
+  } catch {
+    return value;
+  }
 }
 
 function formatEvidence(evidence: AuditReport["findings"][number]["evidence"][number] | undefined) {

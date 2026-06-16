@@ -821,6 +821,9 @@ export default function Home() {
       window.history.pushState(null, "", `#${sectionId}`);
     }
     scrollToSection(sectionId);
+    if (sectionId === "audits") {
+      void loadAuditHistory();
+    }
   }
 
   function navClass(sectionId: string) {

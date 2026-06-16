@@ -61,7 +61,7 @@ fi
 ln -sfn "$API_ENV" apps/api/.env
 ln -sfn "$WEB_ENV" apps/web/.env
 
-pnpm install --frozen-lockfile
+pnpm install --frozen-lockfile --prod=false
 pnpm --filter api db:generate
 pnpm build
 

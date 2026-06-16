@@ -353,7 +353,7 @@ export default function Home() {
     function syncHashToTerminal() {
       const sectionId = decodeURIComponent(window.location.hash.replace(/^#/, ""));
       if (!sectionId) return;
-      requestAnimationFrame(() => scrollToSection(sectionId, "auto"));
+      requestAnimationFrame(() => scrollToSection(sectionId === "findings" ? "audits" : sectionId, "auto"));
     }
 
     syncHashToTerminal();
@@ -752,10 +752,7 @@ export default function Home() {
         </div>
         <nav className={styles.navList} aria-label="Scanner sections">
           <a className={navClass("scan")} href="#scan" onClick={(event) => handleSectionNav(event, "scan")}>Dashboard</a>
-          <a className={navClass("findings")} href="#findings" onClick={(event) => handleSectionNav(event, "findings")}>Findings</a>
-          <a className={navClass("proof")} href="#proof" onClick={(event) => handleSectionNav(event, "proof")}>Walrus / Sui proof</a>
-          <a className={navClass("memwal")} href="#memwal" onClick={(event) => handleSectionNav(event, "memwal")}>MemWal</a>
-          <a className={navClass("activity")} href="#activity" onClick={(event) => handleSectionNav(event, "activity")}>Agent session</a>
+          <a className={navClass("audits")} href="#audits" onClick={(event) => handleSectionNav(event, "audits")}>Audits</a>
         </nav>
         <div className={styles.sidebarFooter}>
           <span>[PROJECT]</span>
@@ -1026,9 +1023,9 @@ export default function Home() {
         ) : null}
 
         {state ? (
-        <section className={styles.terminalPanel} id="findings">
+        <section className={styles.terminalPanel} id="audits">
           <div className={styles.panelHeader}>
-            <h2>[ FINDINGS / REPORT_OUTPUT ]</h2>
+            <h2>[ AUDITS / REPORT_OUTPUT ]</h2>
             <span>{privateReport ? "PRIVATE_REPORT_UNLOCKED" : "PUBLIC_SUMMARY"}</span>
           </div>
 

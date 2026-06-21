@@ -70,6 +70,7 @@ import { summarizePackage } from "@repo/sui-integration";
 type RuntimeConfig = {
   databaseUrl?: string;
   environment: "localhost" | "production";
+  enableLlmAgents: boolean;
   processJobsInApi: boolean;
   llmApiKey?: string;
   llmBaseUrl?: string;
@@ -224,6 +225,7 @@ export function loadRuntimeConfig(env = process.env): RuntimeConfig {
   return {
     databaseUrl: env.DATABASE_URL ?? env.SUPABASE_DATABASE_URL,
     environment: parseRuntimeEnvironment(env.TUSKSCAN_ENV),
+    enableLlmAgents: parseBoolean(env.TUSKSCAN_ENABLE_LLM_AGENTS),
     processJobsInApi: parseBoolean(env.TUSKSCAN_PROCESS_JOBS_IN_API),
     llmApiKey: env.LLM_API_KEY ?? env.OPENAI_API_KEY ?? openRouterApiKey,
     llmBaseUrl: env.LLM_BASE_URL ?? env.OPENAI_BASE_URL ?? (openRouterApiKey ? "https://openrouter.ai/api/v1" : undefined),
@@ -336,7 +338,12 @@ export function validateRuntimeConfig(config: RuntimeConfig) {
       ? "production"
       : "missing",
     network: config.network,
-    llmAgents: config.llmApiKey ? "production" : "disabled",
+    llmAgents:
+      config.enableLlmAgents && config.llmApiKey
+        ? "production"
+        : config.llmApiKey
+          ? "configured-disabled"
+          : "disabled",
     moveTestSandbox: config.runMoveTests ? "enabled" : "disabled",
     auditConfig: config.tuskscanConfigId ? "production" : "missing",
     operatorFinalizer:
@@ -2447,7 +2454,7 @@ type LlmCriticDraft = {
 };
 
 function createLlmAuditAgents(config: RuntimeConfig): LlmAgentBundle | undefined {
-  if (!config.llmApiKey) return undefined;
+  if (!config.enableLlmAgents || !config.llmApiKey) return undefined;
   return {
     criticAgent: {
       critique: async (input) => {

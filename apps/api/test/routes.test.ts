@@ -44,15 +44,25 @@ const fixtureSnapshot: NormalizedPackageSnapshot = {
   source: "sui-normalized-modules",
 };
 
-test("OpenRouter API key configures OpenAI-compatible LLM defaults", () => {
+test("LLM agents stay disabled by default even when OpenRouter is configured", () => {
   const config = loadRuntimeConfig({
     OPENROUTER_API_KEY: "sk-or-test",
   });
 
+  assert.equal(config.enableLlmAgents, false);
   assert.equal(config.llmApiKey, "sk-or-test");
   assert.equal(config.llmBaseUrl, "https://openrouter.ai/api/v1");
   assert.equal(config.llmModel, "openai/gpt-4.1-mini");
   assert.equal(config.llmTitle, "TuskScan");
+});
+
+test("LLM agents require an explicit backend opt-in", () => {
+  const config = loadRuntimeConfig({
+    OPENROUTER_API_KEY: "sk-or-test",
+    TUSKSCAN_ENABLE_LLM_AGENTS: "1",
+  });
+
+  assert.equal(config.enableLlmAgents, true);
 });
 
 test("prepare resolves a repository URL with published package metadata", async () => {

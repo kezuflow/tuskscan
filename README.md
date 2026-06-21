@@ -131,6 +131,7 @@ MEMWAL_SERVER_URL=https://relayer.memwal.ai
 MEMWAL_WAIT_FOR_REMEMBER=1
 MEMWAL_TIMEOUT_MS=120000
 OPENROUTER_API_KEY=<optional OpenRouter API key for researcher/exploit/critic agents>
+TUSKSCAN_ENABLE_LLM_AGENTS=0
 LLM_MODEL=openai/gpt-4.1-mini
 LLM_BASE_URL=https://openrouter.ai/api/v1
 OPENROUTER_HTTP_REFERER=http://localhost:3000
@@ -142,7 +143,7 @@ TUSKSCAN_SUI_BIN=sui
 
 The API package loads `apps/api/.env` automatically when run through `pnpm dev`. It no longer loads `.env.local`. The API fails on startup if Mainnet Sui, database, MemWal, Walrus SDK storage, or TuskScan contract/operator configuration is missing. Keep `TUSKSCAN_PROCESS_JOBS_IN_API=0`; the API package starts its own database queue worker in dev.
 
-OpenRouter is supported through the OpenAI-compatible chat completions API. Setting `OPENROUTER_API_KEY` enables the LLM researcher, exploit, and critic agents with `LLM_BASE_URL=https://openrouter.ai/api/v1`; choose an `LLM_MODEL` that supports JSON mode because TuskScan requests `response_format: { type: "json_object" }`.
+OpenRouter is supported through the OpenAI-compatible chat completions API. Real LLM agents are disabled by default so the deterministic scanner can serve as the pseudo-agent demo. Set `TUSKSCAN_ENABLE_LLM_AGENTS=1` together with `OPENROUTER_API_KEY` to enable the researcher, exploit, and critic agents. Choose an `LLM_MODEL` that supports JSON mode because TuskScan requests `response_format: { type: "json_object" }`.
 
 For real Walrus artifact storage, use:
 

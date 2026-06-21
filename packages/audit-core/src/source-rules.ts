@@ -507,7 +507,11 @@ function createSourceFinding(options: {
   testSuggestions: string[];
   title: string;
 }): AuditFinding {
-  const memoryReferences = matchMemories(options.memories, options.memoryQuery);
+  const memoryReferences = matchMemories(
+    options.memories,
+    options.memoryQuery,
+    options.ruleId,
+  );
   return {
     attackPrerequisites: options.attackPrerequisites,
     category: options.category,

@@ -45,7 +45,11 @@ export function runDeterministicAudit(
             impact:
               "An exposed admin path can let any caller mutate protocol configuration, pause/unpause flows, mint, burn, or sweep assets if authorization is missing in source.",
             fn,
-            memoryReferences: matchMemories(memories, "admin capability"),
+            memoryReferences: matchMemories(
+              memories,
+              "admin capability",
+              "MOVE_PUBLIC_ADMIN_ENTRY",
+            ),
             moduleName: module.name,
             recommendation:
               "Require a dedicated AdminCap/OwnerCap parameter and assert ownership before executing privileged state changes.",
@@ -74,7 +78,11 @@ export function runDeterministicAudit(
             impact:
               "If the source body also lacks sender or ownership checks, this can become a direct privileged action for arbitrary callers.",
             fn,
-            memoryReferences: matchMemories(memories, "missing capability"),
+            memoryReferences: matchMemories(
+              memories,
+              "missing capability",
+              "MOVE_MISSING_CAPABILITY_PARAM",
+            ),
             moduleName: module.name,
             recommendation:
               "Add a capability parameter such as AdminCap or enforce an explicit signer/object ownership check.",
@@ -104,7 +112,11 @@ export function runDeterministicAudit(
             impact:
               "Mutable public entry points are the primary Sui attack surface for shared-object state corruption, unauthorized accounting changes, or invariant bypasses.",
             fn,
-            memoryReferences: matchMemories(memories, "shared object mutation"),
+            memoryReferences: matchMemories(
+              memories,
+              "shared object mutation",
+              "MOVE_PUBLIC_MUTABLE_ENTRY",
+            ),
             moduleName: module.name,
             recommendation:
               "Confirm the mutable object path is gated by ownership, capability checks, or invariant-preserving assertions.",
@@ -133,7 +145,11 @@ export function runDeterministicAudit(
             impact:
               "Value-moving public entry points can drain funds, duplicate claims, or redirect payouts when authorization and replay protections are incomplete.",
             fn,
-            memoryReferences: matchMemories(memories, "withdraw transfer claim"),
+            memoryReferences: matchMemories(
+              memories,
+              "withdraw transfer claim",
+              "MOVE_VALUE_MOVING_ENTRY",
+            ),
             moduleName: module.name,
             recommendation:
               "Check sender authority, recipient restrictions, balance accounting, and replay/claim guards.",

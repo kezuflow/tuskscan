@@ -542,6 +542,47 @@ export async function recallExploitMemories(options: {
   return options.store.recall(options.context, options.limit);
 }
 
+export function selectExploitMemories(
+  memories: MemoryReference[],
+  limit = 20,
+): MemoryReference[] {
+  const selected = new Map<string, MemoryReference>();
+  const ranked = memories
+    .map((memory, index) => ({
+      index,
+      key: memoryPatternKey(memory),
+      memory,
+      priority: memoryPriority(memory),
+    }))
+    .sort((left, right) => left.priority - right.priority || left.index - right.index);
+
+  for (const item of ranked) {
+    if (!selected.has(item.key)) selected.set(item.key, item.memory);
+    if (selected.size >= limit) break;
+  }
+  return [...selected.values()];
+}
+
+function memoryPriority(memory: MemoryReference) {
+  const summary = memory.summary.toLowerCase();
+  if (summary.includes("vulnerability_pattern") || summary.includes('"kind":"vulnerability_pattern"')) {
+    return 0;
+  }
+  if (summary.includes("audit_observation") || summary.includes('"kind":"audit_observation"')) {
+    return 1;
+  }
+  return 2;
+}
+
+function memoryPatternKey(memory: MemoryReference) {
+  const summary = memory.summary;
+  const ruleId =
+    summary.match(/vulnerability_pattern\s+([a-z0-9_]+)/i)?.[1] ??
+    summary.match(/"ruleId"\s*:\s*"([a-z0-9_]+)"/i)?.[1] ??
+    summary.match(/pattern:sui:move:([a-z0-9_]+)/i)?.[1];
+  return ruleId ? `rule:${ruleId.toLowerCase()}` : `memory:${memory.id}`;
+}
+
 export async function writeExploitLessons(options: {
   lessons: string[];
   metadata?: Record<string, string>;

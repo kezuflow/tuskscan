@@ -70,6 +70,28 @@ test("memory references mark matched findings as memory-assisted", () => {
   assert.equal(missingCapFinding?.memoryReferences[0]?.id, "mem-1");
 });
 
+test("exact rule memories take precedence over generic lexical matches", () => {
+  const findings = runDeterministicAudit(vulnerablePackageSnapshot, [
+    {
+      id: "generic",
+      query: "missing capability",
+      summary: "Generic capability guidance without a stored rule identifier.",
+    },
+    {
+      id: "exact",
+      query: "unrelated wording",
+      summary:
+        '{"kind":"vulnerability_pattern","ruleId":"MOVE_MISSING_CAPABILITY_PARAM"}',
+    },
+  ]);
+  const finding = findings.find(
+    (item) => item.ruleId === "MOVE_MISSING_CAPABILITY_PARAM",
+  );
+
+  assert.equal(finding?.memoryReferences[0]?.id, "exact");
+  assert.equal(finding?.memoryReferences.some((memory) => memory.id === "generic"), false);
+});
+
 test("source-aware rules identify unauthenticated public transfer paths", () => {
   const findings = runDeterministicAudit(
     safePackageSnapshot,

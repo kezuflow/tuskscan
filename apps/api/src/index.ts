@@ -49,6 +49,7 @@ import {
   MemWalMemoryStore,
   SdkWalrusStore,
   recallExploitMemories,
+  selectExploitMemories,
   storeAuditArtifacts,
   verifyArtifact,
   writeAuditMemoryRecords,
@@ -2005,10 +2006,10 @@ async function runStoreAndFinalizeAudit(options: {
         recall: async (snapshot) => {
           const recalled = await recallExploitMemories({
             context: buildMemoryRecallContext(snapshot),
-            limit: 20,
+            limit: 100,
             store: options.memory,
           });
-          return recalled.map((item): ExploitMemory => ({
+          return selectExploitMemories(recalled, 20).map((item): ExploitMemory => ({
             ...item,
             query: item.summary,
           }));

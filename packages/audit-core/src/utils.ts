@@ -26,10 +26,21 @@ export function hasCapabilityParam(fn: NormalizedFunction) {
   );
 }
 
-export function matchMemories(memories: ExploitMemory[], query: string): MemoryReference[] {
+export function matchMemories(
+  memories: ExploitMemory[],
+  query: string,
+  ruleId?: string,
+): MemoryReference[] {
   const queryTerms = normalizedTerms(query);
   if (queryTerms.length === 0) return [];
-  return memories
+  const exactRuleMatches = ruleId
+    ? memories.filter((memory) =>
+        memoryMatchesRuleId(`${memory.query} ${memory.summary}`, ruleId),
+      )
+    : [];
+  const candidates = exactRuleMatches.length > 0 ? exactRuleMatches : memories;
+
+  return candidates
     .map((memory) => ({
       memory,
       score: scoreMemoryMatch(`${memory.query} ${memory.summary}`, queryTerms),
@@ -39,6 +50,11 @@ export function matchMemories(memories: ExploitMemory[], query: string): MemoryR
     .map(({ memory }) => memory)
     .map(({ id, summary }) => ({ id, summary }))
     .slice(0, 3);
+}
+
+function memoryMatchesRuleId(value: string, ruleId: string) {
+  const normalizedRuleId = normalizeMemoryText(ruleId).trim();
+  return normalizedRuleId.length > 0 && normalizeMemoryText(value).includes(normalizedRuleId);
 }
 
 function normalizedTerms(value: string) {

@@ -300,6 +300,13 @@ export default function Home() {
     { count: lowCount, label: "low" },
     { count: infoCount, label: "info" },
   ];
+
+  useEffect(() => {
+    const reportFindings = audit?.report?.findings ?? [];
+    if (reportFindings.length === 0) return;
+    const firstMemoryMatch = reportFindings.findIndex((finding) => finding.memoryAssisted);
+    setSelectedFindingIndex(firstMemoryMatch >= 0 ? firstMemoryMatch : 0);
+  }, [audit?.id, audit?.report?.findings]);
   const resolvedSource =
     prepared?.sourceSummary?.url ?? audit?.sourceUrl ?? audit?.report?.sourceSummary?.url ?? sourceUrl;
   const scanProgress =

@@ -5,6 +5,7 @@ import {
   InMemoryExploitMemoryStore,
   InMemoryWalrusStore,
   recallExploitMemories,
+  selectExploitMemories,
   storeAuditArtifacts,
   verifyArtifact,
   writeAuditMemoryRecords,
@@ -151,5 +152,33 @@ test("writes reusable vulnerability patterns and audit observations", async () =
   assert.equal(
     recalled.some((memory) => memory.summary.includes("\"kind\":\"vulnerability_pattern\"")),
     true,
+  );
+});
+
+test("deduplicates recalled records by rule and prioritizes vulnerability patterns", () => {
+  const selected = selectExploitMemories(
+    [
+      {
+        id: "observation",
+        summary:
+          "audit_observation pattern:sui:move:move_missing_capability_param critical",
+      },
+      {
+        id: "pattern",
+        summary:
+          "vulnerability_pattern MOVE_MISSING_CAPABILITY_PARAM Access control critical",
+      },
+      {
+        id: "other-pattern",
+        summary:
+          '{"kind":"vulnerability_pattern","ruleId":"MOVE_PUBLIC_MUTABLE_ENTRY"}',
+      },
+    ],
+    20,
+  );
+
+  assert.deepEqual(
+    selected.map((memory) => memory.id),
+    ["pattern", "other-pattern"],
   );
 });
